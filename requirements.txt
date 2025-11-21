@@ -1,0 +1,8 @@
+flask
+prophet
+plotly
+numpy
+pandas
+requests
+earthengine-api
+

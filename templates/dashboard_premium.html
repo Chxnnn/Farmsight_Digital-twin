@@ -1,0 +1,2382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>FarmSight - Wheat Digital Twin Dashboard</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='premium-style.css') }}">
+    
+    <!-- Plotly for charts (updated to specific version) -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+    
+    <!-- Three.js for 3D visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Chart.js for sparklines -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    
+    <!-- Leaflet for maps -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+</head>
+<body>
+    
+    <header class="dashboard-header">
+        <div class="header-title">
+            <span class="header-logo">🌾</span>
+            <div>
+                <h1>FarmSight Wheat Digital Twin</h1>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0;">Real-time crop monitoring with satellite data and 3D field visualization</p>
+            </div>
+        </div>
+        
+        <!-- Location Search -->
+        <div class="location-search-container">
+            <div class="location-display">
+                <span class="location-icon">📍</span>
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span id="current-location-name" style="font-weight: 600;">{{ config.LOCATION_NAME }}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.8;">
+                        {{ config.LOCATION_COORDS_DISPLAY.lat }}, {{ config.LOCATION_COORDS_DISPLAY.lon }}
+                    </span>
+                </div>
+            </div>
+            <div class="location-search-input-wrapper">
+                <input 
+                    type="text" 
+                    id="location-search-input" 
+                    class="location-search-input"
+                    placeholder="{{ config.LOCATION_COORDS.lat }}, {{ config.LOCATION_COORDS.lon }}"
+                    title="Enter coordinates in decimal format: latitude, longitude"
+                />
+                <span class="tooltip-container" style="display:inline-block; margin-left:0.5rem;">
+                    <span class="help-icon" style="font-size:14px;">?</span>
+                    <span class="tooltip-text tooltip-below" style="width:280px;">
+                        <strong>📍 Location Search</strong><br>
+                        Enter coordinates in <strong>decimal degrees</strong>:<br>
+                        <code style="background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:3px;">latitude, longitude</code><br><br>
+                        <strong>Example:</strong> 26.974583, 83.529583<br>
+                        <strong>India Range:</strong> Lat 6-37°N, Lon 68-98°E<br><br>
+                        <em>Note: Satellite data works globally, but we'll warn if outside India.</em><br>
+                        Press <kbd style="background:#52c196; color:#0a1419; padding:2px 6px; border-radius:3px; font-weight:600;">Enter</kbd> to search
+                    </span>
+                </span>
+                <button class="location-search-btn" onclick="searchLocation()" title="Search location">
+                    🔍
+                </button>
+            </div>
+            <div id="location-search-result" class="location-search-result"></div>
+        </div>
+        
+        <div class="header-actions">
+            <div class="status-badge live">
+                <span class="status-dot"></span>
+                <span>Live Data</span>
+            </div>
+            <button class="btn btn-primary" onclick="refreshDashboard()">
+                🔄 Refresh
+            </button>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+        
+        <!-- ROW 1: NDVI Satellite, Heat Map, Soil Moisture Prediction -->
+        <div class="row-1-grid">
+            
+            <!-- NDVI Satellite Image -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">
+                                🛰️ Satellite View
+                                <span class="tooltip-container">
+                                    <span class="help-icon">?</span>
+                                <span class="tooltip-text tooltip-below" style="width:280px;">
+                                    High-resolution satellite imagery of your field location from ESRI World Imagery (updated every 1-6 months).<br><br>
+                                    <strong>Used for:</strong> Field boundary verification and visual context<br>
+                                    <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                    </span>
+                                </span>
+                            </h2>
+                        <p class="card-subtitle">{{ config.LOCATION_NAME if config.LOCATION_NAME else 'Field Location' }}</p>
+                        </div>
+                    </div>
+                <div class="satellite-viewer">
+                    <div id="satellite-rgb-image" style="height:280px; width:100%; border-radius:8px; overflow:hidden;"></div>
+                        <div style="position:absolute; top:10px; right:10px; z-index:1000; display:flex; gap:5px;">
+                            <button onclick="zoomSatelliteMap('in')" class="map-control-btn" title="Zoom In">➕</button>
+                            <button onclick="zoomSatelliteMap('out')" class="map-control-btn" title="Zoom Out">➖</button>
+                            <button onclick="resetSatelliteMap()" class="map-control-btn" title="Reset View">🎯</button>
+                        </div>
+                    </div>
+                    
+                <!-- Satellite Metadata -->
+                    <div class="satellite-metadata">
+                        <div class="metadata-item">
+                        <div class="metadata-label">🛰️ Source</div>
+                        <div class="metadata-value">ESRI World</div>
+                        </div>
+                        <div class="metadata-item">
+                        <div class="metadata-label">📅 Updates</div>
+                        <div class="metadata-value">1-6 months</div>
+                        </div>
+                        <div class="metadata-item">
+                        <div class="metadata-label">🎯 Resolution</div>
+                        <div class="metadata-value">High-Res</div>
+                            </div>
+                        </div>
+                    </div>
+
+            <!-- NDVI Heatmap -->
+            <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">
+                                📊 NDVI Heat Map
+                                <span class="tooltip-container">
+                                    <span class="help-icon">?</span>
+                                    <span class="tooltip-text tooltip-below" style="width:280px;">
+                                        Color-coded vegetation health map from Sentinel-2 / Landsat satellites (updated every 5 days).<br><br>
+                                        <strong>Used for:</strong> Drives 3D plant colors and health in the field visualization<br>
+                                        <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                    </span>
+                                </span>
+                            </h2>
+                        <p class="card-subtitle">Vegetation health index</p>
+                        </div>
+                    </div>
+                <div id="ndvi-heatmap" style="height:250px; width:100%; min-height:250px;"></div>
+                
+                <!-- NDVI Color Legend -->
+                <div class="ndvi-legend">
+                    <div class="legend-title">📖 How to Read This Map:</div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #1a3a52;"></span>
+                            <span class="legend-text"><strong>Dark Blue (0-0.2):</strong> No vegetation / Bare soil</span>
+                            </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #2d5a7b;"></span>
+                            <span class="legend-text"><strong>Blue (0.2-0.3):</strong> Very sparse crops / Early emergence</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #4a8c6f;"></span>
+                            <span class="legend-text"><strong>Teal (0.3-0.4):</strong> Moderate vegetation / Growing crops</span>
+                    </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #84b574;"></span>
+                            <span class="legend-text"><strong>Green (0.4-0.6):</strong> Healthy crops / Good canopy</span>
+                    </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #c9d96e;"></span>
+                            <span class="legend-text"><strong>Bright Green (0.6+):</strong> Very healthy / Dense vegetation</span>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Soil Moisture Prediction -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">
+                            💧 Soil Moisture Forecast
+                                <span class="tooltip-container">
+                                    <span class="help-icon">?</span>
+                                <span class="tooltip-text tooltip-below" style="width:280px;">
+                                    7-day AI prediction using Facebook Prophet trained on NASA POWER satellite data.<br><br>
+                                    <strong>Used for:</strong> Powers irrigation timing in AI recommendations<br>
+                                    <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                    </span>
+                                </span>
+                            </h2>
+                        <p class="card-subtitle">7-day AI prediction for {{ config.LOCATION_NAME }}</p>
+                        </div>
+                        </div>
+                <div id="forecast-chart" style="height:280px;"></div>
+                
+                <!-- Soil Moisture Interpretation Guide -->
+                <div class="ndvi-legend" style="margin-top:1rem;">
+                    <div class="legend-title">📖 How to Read This Forecast:</div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: linear-gradient(90deg, #52c196, #52c196); width:30px;"></span>
+                            <span class="legend-text"><strong>Green Line:</strong> Predicted soil moisture % over next 7 days</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: rgba(82,193,150,0.2); border:1px solid #52c196; width:30px;"></span>
+                            <span class="legend-text"><strong>Shaded Area:</strong> Confidence interval (prediction uncertainty)</span>
+                    </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #FF6B6B; width:30px;"></span>
+                            <span class="legend-text"><strong>Below 25%:</strong> Critical - AI recommends immediate irrigation</span>
+                            </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #FFD93D; width:30px;"></span>
+                            <span class="legend-text"><strong>25-40%:</strong> Low - Plan irrigation in 1-2 days</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #6BCB77; width:30px;"></span>
+                            <span class="legend-text"><strong>40-60%:</strong> Optimal - Ideal moisture for wheat growth</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #4D96FF; width:30px;"></span>
+                            <span class="legend-text"><strong>Above 60%:</strong> High - Reduce irrigation, risk of waterlogging</span>
+                    </div>
+                                </div>
+                    <div style="margin-top:0.75rem; padding:0.75rem; background:rgba(82,193,150,0.1); border-left:3px solid #52c196; border-radius:4px;">
+                        <strong>🔗 AI Link:</strong> When forecast drops below 25%, the AI Recommendations section automatically suggests irrigation for that day.
+                            </div>
+                            </div>
+                        </div>
+                        
+                                </div>
+                    
+        <!-- ROW 2: 3D Wheat Crop Field + Real-Time Weather -->
+        <div class="row-2-grid">
+            
+            <!-- 3D Wheat Crop Field (2/3 width) -->
+            <div class="card crop-field-card">
+                <div class="card-header">
+                            <div>
+                                <h2 class="card-title">
+                                    🌾 3D Wheat Crop Field - Digital Twin
+                                    <span class="tooltip-container">
+                                        <span class="help-icon">?</span>
+                                        <span class="tooltip-text" style="width:280px;">
+                                            Virtual replica synced with real satellite data (NDVI for plant color, NASA for soil moisture, weather for growth).<br><br>
+                                            <strong>Used for:</strong> Visualize field health and simulate irrigation/fertilization impacts<br>
+                                            <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                        </span>
+                                    </span>
+                                </h2>
+                        <p class="card-subtitle">True digital twin synchronized with real satellite data</p>
+                        </div>
+                    </div>
+                    
+                <!-- MODE TOGGLE: Live Data vs Simulation -->
+                <div class="mode-toggle-container">
+                    <div class="mode-toggle-header">
+                        <span class="mode-label">🛰️ Live Data Mode</span>
+                        <label class="mode-switch">
+                            <input type="checkbox" id="twin-mode-toggle" onchange="toggleTwinMode(this.checked)">
+                            <span class="mode-switch-slider"></span>
+                        </label>
+                        <span class="mode-label">🎮 Simulation Mode</span>
+                    </div>
+                    <div class="mode-description">
+                        <span id="mode-description-text">
+                            <strong>🛰️ LIVE MODE:</strong> Field driven by real NASA soil moisture ({{ nasa_soil_moisture|round(1) }}%) and NDVI satellite data. Growth stage auto-calculated from {{ crop.gdd|round(0) }} 
+                            <span class="tooltip-container" style="display:inline;">
+                                <span style="text-decoration:underline; cursor:help;">GDD</span>
+                                <span class="tooltip-text" style="width:280px;">
+                                    <strong>📊 GDD = Growing Degree Days</strong><br>
+                                    A measure of heat accumulation used to predict plant growth.<br>
+                                    <strong>Formula:</strong> Daily Temp (°C) - Base Temp (0°C)<br>
+                                    <strong>Example:</strong> 20°C day = 20 GDD added<br>
+                                    <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                </span>
+                            </span>
+                            ({{ crop.age_days|round(1) }} days old).
+                        </span>
+                        </div>
+                    </div>
+                    
+                <!-- Growth Stage Selector (Simulation Mode Only) -->
+                <div class="stage-selector-container" id="stage-selector-wrapper" style="display:none;">
+                    <label for="stage-dropdown" style="font-weight:600; color:var(--text-secondary); margin-right:1rem;">Select Growth Stage:</label>
+                    <select id="stage-dropdown" class="stage-dropdown" onchange="updateCropFieldStage(this.value)">
+                        <option value="emergence">🌱 Emergence (0-10 days)</option>
+                        <option value="tillering">🌿 Tillering (10-30 days)</option>
+                        <option value="stem_elongation">📏 Stem Elongation (30-50 days)</option>
+                        <option value="booting">🌾 Booting (50-60 days)</option>
+                        <option value="heading">🌾 Heading (60-80 days)</option>
+                        <option value="grain_filling">🌾 Grain Filling (80-100 days)</option>
+                    </select>
+                            </div>
+                            
+                <!-- Live Mode Info (Live Mode Only) -->
+                <div class="live-mode-info" id="live-mode-info">
+                    <div class="live-info-grid">
+                        <div class="live-info-item">
+                            <span class="live-icon">🛰️</span>
+                                <div>
+                                <div class="live-label">NASA Soil Moisture</div>
+                                <div class="live-value">{{ nasa_soil_moisture|round(1) }}%</div>
+                                </div>
+                        </div>
+                        <div class="live-info-item">
+                            <span class="live-icon">📊</span>
+                                <div>
+                                <div class="live-label">NDVI Health</div>
+                                <div class="live-value">{{ (ndvi_mean * 100)|round(0) if ndvi_mean else 'N/A' }}%</div>
+                                </div>
+                            </div>
+                        <div class="live-info-item">
+                            <span class="live-icon">📅</span>
+                                <div>
+                                <div class="live-label">Auto Stage</div>
+                                <div class="live-value">{{ crop.stage|title }}</div>
+                            </div>
+                        </div>
+                        <div class="live-info-item">
+                            <span class="live-icon">🌡️</span>
+                                <div>
+                                <div class="live-label">Growing Degree Days</div>
+                                <div class="live-value">{{ crop.gdd|round(0) }} GDD</div>
+                    </div>
+                </div>
+                    </div>
+                    </div>
+                    
+                <!-- 3D Field Container -->
+                <div class="field-3d-container">
+                    <div id="wheat-field-3d" class="field-canvas"></div>
+                    <div class="field-controls-hint">
+                        <div class="hint-item">🖱️ Drag to rotate</div>
+                        <div class="hint-item">🔍 Scroll to zoom</div>
+                        <div class="hint-item">✋ Right-click to pan</div>
+                            </div>
+                        </div>
+
+                <!-- Irrigation & Fertilization Controls (Simulation Mode Only) -->
+                <div class="field-controls" id="simulation-controls" style="display:none;">
+                    <div class="simulation-mode-banner">
+                        <span class="banner-icon">🎮</span>
+                        <span class="banner-text">Simulation Mode: Manually adjust irrigation and fertilization to see stress effects</span>
+                            </div>
+                    <div class="control-section">
+                        <div class="control-header">
+                            <span class="control-icon">💧</span>
+                            <span class="control-label">Irrigation Level</span>
+                            </div>
+                        <div class="control-value-display">
+                            <span id="irrigation-percentage" class="percentage-value">70%</span>
+                            <span class="status-indicator" id="irrigation-status">Ideal</span>
+                            </div>
+                        <div class="control-buttons">
+                            <button class="control-btn decrease" onclick="adjustIrrigation(-10)">-10%</button>
+                            <button class="control-btn increase" onclick="adjustIrrigation(10)">+10%</button>
+                        </div>
+                        <div class="control-bar">
+                            <div class="control-bar-fill" id="irrigation-bar" style="width: 70%;"></div>
+                            </div>
+                        </div>
+
+                    <div class="control-section">
+                        <div class="control-header">
+                            <span class="control-icon">🌱</span>
+                            <span class="control-label">Fertilization Level</span>
+                            </div>
+                        <div class="control-value-display">
+                            <span id="fertilization-percentage" class="percentage-value">80%</span>
+                            <span class="status-indicator" id="fertilization-status">Ideal</span>
+                            </div>
+                        <div class="control-buttons">
+                            <button class="control-btn decrease" onclick="adjustFertilization(-10)">-10%</button>
+                            <button class="control-btn increase" onclick="adjustFertilization(10)">+10%</button>
+                            </div>
+                        <div class="control-bar">
+                            <div class="control-bar-fill" id="fertilization-bar" style="width: 80%;"></div>
+                    </div>
+                            </div>
+                        </div>
+
+                <!-- Field Info -->
+                <div class="field-info">
+                    <div class="info-item">
+                        <span class="info-label">Current Stage:</span>
+                        <span class="info-value" id="current-stage-name">{{ crop.stage|title }}</span>
+                            </div>
+                    <div class="info-item">
+                        <span class="info-label">Field Density:</span>
+                        <span class="info-value" id="field-density">60-80 plants/m²</span>
+                            </div>
+                    <div class="info-item">
+                        <span class="info-label">Stress Tier:</span>
+                        <span class="info-value" id="stress-tier">Ideal</span>
+                        </div>
+                    <div class="info-item">
+                        <span class="info-label">Field Health:</span>
+                        <span class="info-value" id="field-health">100%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Weather + AI Recommendations Stacked Vertically -->
+            <div class="right-column-stack">
+                
+                <!-- Real-Time Weather Conditions -->
+                <div class="card weather-card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">
+                                ☀️ Real-Time Weather
+                                <span class="tooltip-container">
+                                    <span class="help-icon">?</span>
+                                    <span class="tooltip-text" style="width:280px;">
+                                        Current weather data from OpenWeather API (temperature, humidity, rainfall).<br><br>
+                                        <strong>Used for:</strong> Calculates growth stages (GDD) and influences soil moisture forecasts<br>
+                                        <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                    </span>
+                                </span>
+                            </h2>
+                            <p class="card-subtitle">{{ config.LOCATION_NAME if config.LOCATION_NAME else 'Current Location' }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="weather-grid">
+                        <div class="weather-item">
+                            <div class="weather-icon">🌡️</div>
+                            <div class="weather-label">Temperature</div>
+                            <div class="weather-value">{{ weather.temperature }}°C</div>
+                            </div>
+
+                        <div class="weather-item">
+                            <div class="weather-icon">💨</div>
+                            <div class="weather-label">Humidity</div>
+                            <div class="weather-value">{{ weather.humidity }}%</div>
+                        </div>
+
+                        <div class="weather-item">
+                            <div class="weather-icon">🌧️</div>
+                            <div class="weather-label">Rainfall</div>
+                            <div class="weather-value">{{ weather.rainfall }} mm</div>
+                            <div class="weather-sublabel">Last 24 hours</div>
+                        </div>
+
+                        <div class="weather-item">
+                            <div class="weather-icon">💧</div>
+                            <div class="weather-label">Soil Moisture</div>
+                            <div class="weather-value">{{ weather.soil_moisture|round(1) }}%</div>
+                        </div>
+                    </div>
+
+                    <div class="weather-insight">
+                        <strong>💡 Insight:</strong>
+                        <p>{{ weather_recommendation }}</p>
+                    </div>
+                </div>
+
+                <!-- AI Recommendations (Below Weather) -->
+                <div class="card ai-recommendations-card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">
+                                🤖 AI Recommendations
+                                <span class="tooltip-container">
+                                    <span class="help-icon">?</span>
+                                    <span class="tooltip-text" style="width:280px;">
+                                        Q-Learning AI analyzes soil moisture forecast, weather, and crop stage to recommend optimal irrigation/fertilization timing.<br><br>
+                                        <strong>Used for:</strong> Daily action plan based on predicted soil moisture levels<br>
+                                        <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
+                                    </span>
+                                </span>
+                            </h2>
+                            <p class="card-subtitle">7-day action plan for {{ config.LOCATION_NAME }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="recommendations-timeline-vertical">
+                        {% set today_weekday = now.weekday() %}
+                        {% set days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] %}
+                        {% for rec in recommendations %}
+                        {% set day_offset = loop.index0 %}
+                        {% set target_weekday = (today_weekday + day_offset) % 7 %}
+                        {% set day_name = days_of_week[target_weekday] %}
+                        {% set is_today = day_offset == 0 %}
+                        <div class="recommendation-item-vertical {% if is_today %}today-highlight{% endif %}">
+                            <div class="rec-day-badge">
+                                {% if is_today %}
+                                📍
+                                {% elif day_offset == 1 %}
+                                ⏰
+                                {% elif day_offset == 2 %}
+                                📅
+                                {% else %}
+                                📌
+                                {% endif %}
+                            </div>
+                            <div class="rec-content-vertical">
+                                <div class="rec-day-label">{{ day_name }}{% if is_today %} (Today){% endif %}</div>
+                                <div class="rec-text-vertical">{{ rec }}</div>
+                            </div>
+                            <div class="rec-action-icon">
+                                {% if is_today %}
+                                ☑️
+                                {% else %}
+                                🌱
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                    </div>
+                    
+                    </div>
+                    
+        <!-- FAQ / Learn More Section -->
+        <div id="faq-section" class="faq-section">
+            <h2 class="faq-title">📚 Understand Your Dashboard</h2>
+            <p class="faq-subtitle">Click on each section to learn more about data sources, calculations, and how it's used</p>
+            
+            <div class="faq-container">
+                <!-- FAQ 1: Satellite View -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>🛰️ Satellite View</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>📡 Data Source</h4>
+                        <p><strong>Provider:</strong> ESRI World Imagery (powered by WorldView, GeoEye, Landsat satellites)</p>
+                        <p><strong>Update Frequency:</strong> 1-6 months depending on location</p>
+                        <p><strong>Resolution:</strong> High-resolution RGB imagery (up to 30cm per pixel)</p>
+                        
+                        <h4>🔍 How We Use This Data</h4>
+                        <ul>
+                            <li><strong>Field Verification:</strong> Visual confirmation of field boundaries and location</li>
+                            <li><strong>Crop Pattern Detection:</strong> Identifying visible rows, bare soil patches, or stress areas</li>
+                            <li><strong>Context for NDVI:</strong> Complementing spectral data with visual imagery</li>
+                            <li><strong>Historical Comparison:</strong> Track visual changes over seasons (when imagery updates)</li>
+                        </ul>
+                        
+                        <h4>📊 Dashboard Integration</h4>
+                        <p>The satellite view is <strong>interactive</strong> - you can zoom in/out and pan to explore your field. It provides geographical context for all other data points displayed in the dashboard.</p>
+                        
+                        <p><strong>Note:</strong> This is optical imagery, not the same as NDVI (which uses infrared bands).</p>
+                    </div>
+                </div>
+
+                <!-- FAQ 2: NDVI Heat Map -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>📊 NDVI Heat Map</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>📡 Data Source</h4>
+                        <p><strong>Provider:</strong> Sentinel-2 / Landsat (via simulated data in this version)</p>
+                        <p><strong>NDVI Formula:</strong> (NIR - Red) / (NIR + Red)</p>
+                        <p><strong>Range:</strong> -1.0 to +1.0 (vegetation typically 0.2 to 0.8)</p>
+                        
+                        <h4>🌡️ What is a Heat Map?</h4>
+                        <p>A <strong>heat map</strong> is a color-coded grid that shows vegetation health across your field:</p>
+                        <ul>
+                            <li><strong>Dark Blue (0.0-0.2):</strong> No vegetation / Bare soil</li>
+                            <li><strong>Blue (0.2-0.3):</strong> Very sparse crops / Early emergence</li>
+                            <li><strong>Teal (0.3-0.4):</strong> Moderate vegetation / Growing crops</li>
+                            <li><strong>Green (0.4-0.6):</strong> Healthy crops / Good canopy</li>
+                            <li><strong>Bright Green (0.6+):</strong> Very healthy / Dense vegetation</li>
+                        </ul>
+                        
+                        <h4>🔍 How We Obtain This Data</h4>
+                        <p>NDVI is calculated from satellite images using <strong>Near-Infrared (NIR)</strong> and <strong>Red</strong> light bands. Healthy plants reflect more NIR and absorb more Red light, resulting in higher NDVI values.</p>
+                        
+                        <h4>📊 How We Use This Data in the Dashboard</h4>
+                        <ol>
+                            <li><strong>3D Field Visualization:</strong> Each plant in the 3D model gets its color and health from the corresponding NDVI grid cell</li>
+                            <li><strong>Crop Health Assessment:</strong> NDVI values feed into the digital twin's <code>health</code> parameter (0-100%)</li>
+                            <li><strong>Stress Detection:</strong> Low NDVI areas (yellow/brown in 3D) indicate water or nutrient stress</li>
+                            <li><strong>Spatial Variability:</strong> Shows which parts of your field are performing better or worse</li>
+                        </ol>
+                        
+                        <p><strong>Real-time Link:</strong> In Live Data Mode, NDVI directly influences plant appearance and density in the 3D field!</p>
+                        </div>
+                    </div>
+                    
+                <!-- FAQ 3: Soil Moisture Forecast -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>💧 Soil Moisture Forecast</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>📡 Data Sources</h4>
+                        <p><strong>Historical Data:</strong> NASA POWER API - Real soil moisture data based on your location ({{ config.LOCATION_COORDS_DISPLAY.lat if config.LOCATION_COORDS_DISPLAY else config.LOCATION_COORDS.lat }}, {{ config.LOCATION_COORDS_DISPLAY.lon if config.LOCATION_COORDS_DISPLAY else config.LOCATION_COORDS.lon }})</p>
+                        <p><strong>Weather Forecast:</strong> OpenWeather API - Temperature, rainfall, humidity predictions</p>
+                        <p><strong>Prediction Model:</strong> Facebook Prophet AI - Time series forecasting</p>
+                        
+                        <h4>🤖 How Predictions are Made</h4>
+                        <ol>
+                            <li><strong>Step 1:</strong> Collect 30 days of historical soil moisture from NASA POWER</li>
+                            <li><strong>Step 2:</strong> Feed data into Prophet AI model to learn patterns</li>
+                            <li><strong>Step 3:</strong> Generate 7-day forecast with confidence intervals</li>
+                            <li><strong>Step 4:</strong> Adjust predictions based on upcoming weather (rainfall, temperature)</li>
+                        </ol>
+                        
+                        <h4>📈 Understanding the Chart</h4>
+                        <ul>
+                            <li><strong>X-Axis:</strong> Days (Day 1 = Tomorrow, Day 7 = 7 days out)</li>
+                            <li><strong>Y-Axis:</strong> Soil Moisture Percentage (0-100%)</li>
+                            <li><strong>Green Line:</strong> Predicted moisture level</li>
+                            <li><strong>Red Dashed Line:</strong> Critical threshold (25% - below this requires irrigation)</li>
+                            <li><strong>Hover Tooltip:</strong> Shows full date, day of week, predicted value, and confidence range</li>
+                        </ul>
+                        
+                        <h4>📊 How We Use This Data in the Dashboard</h4>
+                        <ul>
+                            <li><strong>AI Recommendations:</strong> If moisture drops below 25%, the Q-Learning agent recommends irrigation</li>
+                            <li><strong>Live Data Mode:</strong> Current NASA moisture syncs with the digital twin's <code>soil_moisture</code> parameter</li>
+                            <li><strong>3D Field Color:</strong> Low moisture = Brown plants, High moisture = Green plants</li>
+                            <li><strong>Irrigation Planning:</strong> Helps you schedule watering in advance</li>
+                        </ul>
+                        
+                        <p><strong>Location-Specific:</strong> Forecasts are calculated specifically for <strong>{{ config.LOCATION_NAME }}</strong> using its exact latitude and longitude!</p>
+                            </div>
+                            </div>
+
+                <!-- FAQ 4: 3D Wheat Crop Field -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>🌾 3D Wheat Crop Field</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>🎯 What is the Digital Twin?</h4>
+                        <p>The <strong>3D Wheat Crop Field</strong> is a true digital twin - a virtual replica of your real field that updates in real-time based on satellite data, weather, and growth models.</p>
+                        
+                        <h4>🌡️ GDD & Auto-Stage Selection</h4>
+                        <p><strong>GDD (Growing Degree Days)</strong> is a heat accumulation metric that predicts plant growth:</p>
+                        
+                        <table class="faq-table">
+                            <thead>
+                                <tr>
+                                    <th>Growth Stage</th>
+                                    <th>GDD Range</th>
+                                    <th>Approx Days</th>
+                                    <th>What's Happening</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>🌱 Emergence</td>
+                                    <td>0 - 180</td>
+                                    <td>0-10 days</td>
+                                    <td>Seed germination, first leaves</td>
+                                </tr>
+                                <tr>
+                                    <td>🌿 Tillering</td>
+                                    <td>180 - 395</td>
+                                    <td>10-30 days</td>
+                                    <td>Multiple stems form</td>
+                                </tr>
+                                <tr>
+                                    <td>📏 Stem Elongation</td>
+                                    <td>395 - 705</td>
+                                    <td>30-50 days</td>
+                                    <td>Rapid height growth</td>
+                                </tr>
+                                <tr>
+                                    <td>🌾 Booting</td>
+                                    <td>705 - 990</td>
+                                    <td>50-60 days</td>
+                                    <td>Wheat head forms inside stem</td>
+                                </tr>
+                                <tr>
+                                    <td>🌾 Heading</td>
+                                    <td>990 - 1425</td>
+                                    <td>60-80 days</td>
+                                    <td>Wheat head emerges, flowering</td>
+                                </tr>
+                                <tr>
+                                    <td>🌾 Grain Filling</td>
+                                    <td>1425+</td>
+                                    <td>80-100+ days</td>
+                                    <td>Grains develop and mature</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        
+                        <h4>📊 How GDD is Calculated</h4>
+                        <p><strong>Formula:</strong> Daily GDD = Temperature (°C) - Base Temperature (0°C for wheat)</p>
+                        <p><strong>Example:</strong> If today is 25°C, you add 25 GDD. Tomorrow is 18°C, you add 18 GDD. Total = 43 GDD.</p>
+                        <p><strong>Your Current Status:</strong> {{ crop.gdd|round(0) }} GDD ({{ crop.age_days|round(1) }} days old)</p>
+                        
+                        <h4>🎮 Two Modes</h4>
+                        <ul>
+                            <li><strong>🛰️ Live Data Mode:</strong> Stage auto-calculated from GDD, synced with NASA moisture & NDVI</li>
+                            <li><strong>🎮 Simulation Mode:</strong> Manually select stage and adjust irrigation/fertilization to experiment</li>
+                        </ul>
+                        
+                        <h4>🖱️ 3D Controls</h4>
+                        <ul>
+                            <li><strong>Rotate:</strong> Left mouse button + drag</li>
+                            <li><strong>Zoom:</strong> Mouse wheel scroll</li>
+                            <li><strong>Pan:</strong> Right mouse button + drag (or Shift + left mouse)</li>
+                        </ul>
+                        
+                        <h4>📊 Data Integration</h4>
+                        <p>The 3D field combines <strong>ALL</strong> data sources:</p>
+                        <ul>
+                            <li><strong>NDVI → Plant Color:</strong> Each plant's health matches NDVI grid cell</li>
+                            <li><strong>NASA Moisture → Stress Level:</strong> Low moisture = Brown/yellow plants</li>
+                            <li><strong>Temperature → GDD → Stage:</strong> Plant structure changes with growth</li>
+                            <li><strong>crop_field_appearance.md:</strong> Botanical accuracy for each stress tier</li>
+                        </ul>
+                        </div>
+                    </div>
+                    
+                <!-- FAQ 5: Real-Time Weather -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>☀️ Real-Time Weather</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>📡 Data Source</h4>
+                        <p><strong>Provider:</strong> OpenWeather API</p>
+                        <p><strong>Location:</strong> {{ config.LOCATION_NAME }} ({{ config.LOCATION_COORDS_DISPLAY.lat if config.LOCATION_COORDS_DISPLAY else config.LOCATION_COORDS.lat }}, {{ config.LOCATION_COORDS_DISPLAY.lon if config.LOCATION_COORDS_DISPLAY else config.LOCATION_COORDS.lon }})</p>
+                        <p><strong>Update Frequency:</strong> Real-time (refreshes when you click the Refresh button)</p>
+                        
+                        <h4>🌡️ Metrics Displayed</h4>
+                        <ul>
+                            <li><strong>Temperature:</strong> Current air temperature in Celsius</li>
+                            <li><strong>Humidity:</strong> Relative humidity percentage</li>
+                            <li><strong>Rainfall:</strong> Precipitation amount (mm)</li>
+                        </ul>
+                        
+                        <h4>📊 How We Use This Data in the Dashboard</h4>
+                        <ul>
+                            <li><strong>GDD Calculation:</strong> Daily temperature accumulates to drive growth stage progression</li>
+                            <li><strong>Stress Modeling:</strong> High temp + low humidity = increased water stress</li>
+                            <li><strong>Irrigation Decisions:</strong> Rainfall affects soil moisture predictions and recommendations</li>
+                            <li><strong>Digital Twin Updates:</strong> Weather conditions update the twin's internal state every refresh</li>
+                        </ul>
+                        
+                        <h4>🎯 Weather-Based Insights</h4>
+                        <p>The dashboard provides smart recommendations:</p>
+                        <ul>
+                            <li>Rain expected → Delay irrigation</li>
+                            <li>High temperature → Monitor soil moisture closely</li>
+                            <li>Low humidity → Watch for plant stress</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- FAQ 6: AI Recommendations -->
+                <div class="faq-item">
+                    <button class="faq-question" onclick="toggleFAQ(this)">
+                        <span>🤖 AI Recommendations</span>
+                        <span class="faq-icon">+</span>
+                    </button>
+                    <div class="faq-answer">
+                        <h4>🧠 AI Model</h4>
+                        <p><strong>Type:</strong> Q-Learning Reinforcement Learning Agent</p>
+                        <p><strong>Training:</strong> Pre-trained on wheat farming scenarios</p>
+                        <p><strong>Goal:</strong> Maximize crop health while minimizing resource waste</p>
+                        
+                        <h4>📊 How Recommendations are Generated</h4>
+                        <ol>
+                            <li><strong>Input Data:</strong> Soil moisture forecast (7 days), current weather, crop stage, historical actions</li>
+                            <li><strong>State Analysis:</strong> Agent evaluates current field conditions and predicted trajectory</li>
+                            <li><strong>Action Selection:</strong> Chooses best action (irrigate, fertilize, or wait) for each day</li>
+                            <li><strong>Optimization:</strong> Balances immediate needs vs. long-term crop health</li>
+                        </ol>
+                        
+                        <h4>🎯 Types of Recommendations</h4>
+                        <ul>
+                            <li><strong>Irrigate:</strong> When predicted moisture drops below 30% threshold</li>
+                            <li><strong>Fertilize:</strong> During key growth stages (Tillering, Stem Elongation)</li>
+                            <li><strong>Wait/Monitor:</strong> When conditions are stable and no action needed</li>
+                        </ul>
+                        
+                        <h4>📈 Data Sources Used</h4>
+                        <p>Recommendations integrate multiple data streams:</p>
+                        <ul>
+                            <li><strong>Prophet Soil Moisture Forecast:</strong> 7-day predictions guide timing</li>
+                            <li><strong>Weather Data:</strong> Rainfall probability affects irrigation decisions</li>
+                            <li><strong>Crop Stage (GDD):</strong> Growth phase determines fertilizer needs</li>
+                            <li><strong>Historical Performance:</strong> Q-Learning learns from past results</li>
+                        </ul>
+                        
+                        <h4>💡 How to Use Recommendations</h4>
+                        <p>Each recommendation includes:</p>
+                        <ul>
+                            <li><strong>Day:</strong> When to take action (Day 1 = tomorrow)</li>
+                            <li><strong>Predicted Soil Moisture:</strong> Expected moisture level on that day</li>
+                            <li><strong>Action:</strong> What to do (irrigate, fertilize, wait)</li>
+                            <li><strong>Reasoning:</strong> Why the AI suggests this action</li>
+                        </ul>
+                        
+                        <p><strong>Note:</strong> These are <em>recommendations</em>, not commands. Always combine with your local knowledge and field observations!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // Data from Flask
+        const cropData = {{ crop | tojson }};
+        const weatherData = {{ weather | tojson }};
+        const forecastData = {{ forecast | tojson }};
+        const ndviData = {{ ndvi_json | safe }};
+        const ndviMetadata = {{ ndvi_metadata | tojson }};
+        const nasaSoilMoisture = {{ nasa_soil_moisture if nasa_soil_moisture else 35 }};
+        const ndviMean = {{ ndvi_mean if ndvi_mean else 0.5 }};
+        
+        // Current selected stage (starts with crop's actual stage)
+        let selectedStage = '{{ crop.stage }}';
+        
+        // Mode: 'live' or 'simulation'
+        let currentMode = 'live';
+        
+        // Irrigation and Fertilization levels (0-100%)
+        // In live mode, these come from twin state
+        let irrigationLevel = {{ ((crop.soil_moisture - 5) / 65 * 100)|round(0) }};
+        let fertilizationLevel = {{ crop.nitrogen|round(0) }};
+        
+        // Growth Stage Database (from crop_field_appearance.md)
+        const GROWTH_STAGES = {
+            emergence: {
+                name: 'Emergence',
+                days: '0-10',
+                heightRange: [3, 8],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0x4CAF50, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Even emergence, bright green seedlings, no gaps' 
+                    },
+                    tier1: { 
+                        color: 0x90C47E, 
+                        density: 0.9, 
+                        height: 0.95,
+                        description: 'Small empty spots, slightly pale leaves, slight edge curl' 
+                    },
+                    tier2: { 
+                        color: 0xA3C76D, 
+                        density: 0.7, 
+                        height: 0.8,
+                        description: 'Many weak seedlings, visible patchiness, yellow tint' 
+                    },
+                    tier3: { 
+                        color: 0xa67c52, 
+                        density: 0.4, 
+                        height: 0.6,
+                        description: 'Sparse field, many dead seedlings, brown tips' 
+                    }
+                }
+            },
+            tillering: {
+                name: 'Tillering',
+                days: '10-30',
+                heightRange: [10, 25],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0x52c196, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Many tillers, full canopy closure, dark green' 
+                    },
+                    tier1: { 
+                        color: 0x84b574, 
+                        density: 0.85, 
+                        height: 0.95,
+                        description: 'Slightly uneven canopy, pale lower leaves' 
+                    },
+                    tier2: { 
+                        color: 0xb8b857, 
+                        density: 0.65, 
+                        height: 0.8,
+                        description: 'Strong patchiness, yellowing lower leaves' 
+                    },
+                    tier3: { 
+                        color: 0x8b6f47, 
+                        density: 0.35, 
+                        height: 0.6,
+                        description: 'Many dead tillers, sparse field, brown clusters' 
+                    }
+                }
+            },
+            stem_elongation: {
+                name: 'Stem Elongation',
+                days: '30-50',
+                heightRange: [30, 60],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0x52c196, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Tall straight stems, dark green canopy, uniform height' 
+                    },
+                    tier1: { 
+                        color: 0x84b574, 
+                        density: 0.85, 
+                        height: 0.95,
+                        description: 'Slight height differences, mild leaf fold' 
+                    },
+                    tier2: { 
+                        color: 0xb8b857, 
+                        density: 0.65, 
+                        height: 0.8,
+                        description: 'Visible uneven heights, rolling leaves, bending stems' 
+                    },
+                    tier3: { 
+                        color: 0x8b6f47, 
+                        density: 0.35, 
+                        height: 0.5,
+                        description: 'Large collapsed areas, many bent/dead stems' 
+                    }
+                }
+            },
+            booting: {
+                name: 'Booting',
+                days: '50-60',
+                heightRange: [65, 80],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0x52c196, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Upright flag leaves, even boot swelling' 
+                    },
+                    tier1: { 
+                        color: 0x84b574, 
+                        density: 0.85, 
+                        height: 0.95,
+                        description: 'Slightly pale flag leaves, mild boot softening' 
+                    },
+                    tier2: { 
+                        color: 0xb8b857, 
+                        density: 0.65, 
+                        height: 0.8,
+                        description: 'Noticeable boot distortions, patchy canopy' 
+                    },
+                    tier3: { 
+                        color: 0x8b6f47, 
+                        density: 0.35, 
+                        height: 0.6,
+                        description: 'Boot collapse, high sterility, yellow/brown zones' 
+                    }
+                }
+            },
+            heading: {
+                name: 'Heading',
+                days: '60-80',
+                heightRange: [80, 100],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0xc9b896, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Straight spikes, fully emerged heads' 
+                    },
+                    tier1: { 
+                        color: 0xc9b896, 
+                        density: 0.85, 
+                        height: 0.95,
+                        description: 'Awn tips dry, slight uneven color' 
+                    },
+                    tier2: { 
+                        color: 0xd4a574, 
+                        density: 0.65, 
+                        height: 0.8,
+                        description: 'Heads droop, early bleaching patches' 
+                    },
+                    tier3: { 
+                        color: 0x8b6f47, 
+                        density: 0.35, 
+                        height: 0.6,
+                        description: 'Severe wilting, spike collapse' 
+                    }
+                }
+            },
+            grain_filling: {
+                name: 'Grain Filling',
+                days: '80-100',
+                heightRange: [100, 110],
+                density: [60, 80],
+                irrigationOptimal: [70, 100],
+                fertilizationOptimal: [80, 100],
+                tiers: {
+                    ideal: { 
+                        color: 0xc9b896, 
+                        density: 1.0, 
+                        height: 1.0,
+                        description: 'Plump grains, uniform golden transition' 
+                    },
+                    tier1: { 
+                        color: 0xd4a574, 
+                        density: 0.85, 
+                        height: 0.95,
+                        description: 'Slight grain shrink, faster drying' 
+                    },
+                    tier2: { 
+                        color: 0xa67c52, 
+                        density: 0.65, 
+                        height: 0.8,
+                        description: '30-50% grain shrivel, premature drying' 
+                    },
+                    tier3: { 
+                        color: 0x8b6f47, 
+                        density: 0.35, 
+                        height: 0.6,
+                        description: 'Severe shrinkage, heavy lodging, grain abortion' 
+                    }
+                }
+            }
+        };
+
+        // Calculate stress tier based on irrigation and fertilization
+        function calculateStressTier(irrigation, fertilization, stage) {
+            const stageData = GROWTH_STAGES[stage];
+            const irrMin = stageData.irrigationOptimal[0];
+            const fertMin = stageData.fertilizationOptimal[0];
+            
+            // Determine irrigation stress
+            let irrStress = 0;
+            if (irrigation >= irrMin) irrStress = 0;
+            else if (irrigation >= 50) irrStress = 1;
+            else if (irrigation >= 30) irrStress = 2;
+            else irrStress = 3;
+            
+            // Determine fertilization stress
+            let fertStress = 0;
+            if (fertilization >= fertMin) fertStress = 0;
+            else if (fertilization >= 60) fertStress = 1;
+            else if (fertilization >= 40) fertStress = 2;
+            else fertStress = 3;
+            
+            // Return the worst stress level
+            const maxStress = Math.max(irrStress, fertStress);
+            
+            let tierResult = 'tier3';
+            if (maxStress === 0) tierResult = 'ideal';
+            else if (maxStress === 1) tierResult = 'tier1';
+            else if (maxStress === 2) tierResult = 'tier2';
+            
+            console.log('🎯 calculateStressTier:', { 
+                stage, 
+                irrigation, 
+                fertilization, 
+                irrMin, 
+                fertMin, 
+                irrStress, 
+                fertStress, 
+                maxStress, 
+                tierResult 
+            });
+            
+            return tierResult;
+        }
+
+        // Update UI indicators
+        function updateStressIndicators() {
+            const stageData = GROWTH_STAGES[selectedStage];
+            const tier = calculateStressTier(irrigationLevel, fertilizationLevel, selectedStage);
+            const tierData = stageData.tiers[tier];
+            
+            // Update irrigation status
+            const irrStatus = document.getElementById('irrigation-status');
+            if (irrigationLevel >= stageData.irrigationOptimal[0]) {
+                irrStatus.textContent = 'Ideal';
+                irrStatus.style.color = 'var(--health-excellent)';
+            } else if (irrigationLevel >= 50) {
+                irrStatus.textContent = 'Minor Stress';
+                irrStatus.style.color = '#f39c12';
+            } else if (irrigationLevel >= 30) {
+                irrStatus.textContent = 'Moderate Stress';
+                irrStatus.style.color = '#e67e22';
+            } else {
+                irrStatus.textContent = 'Severe Stress!';
+                irrStatus.style.color = '#e74c3c';
+            }
+            
+            // Update fertilization status
+            const fertStatus = document.getElementById('fertilization-status');
+            if (fertilizationLevel >= stageData.fertilizationOptimal[0]) {
+                fertStatus.textContent = 'Ideal';
+                fertStatus.style.color = 'var(--health-excellent)';
+            } else if (fertilizationLevel >= 60) {
+                fertStatus.textContent = 'Minor Stress';
+                fertStatus.style.color = '#f39c12';
+            } else if (fertilizationLevel >= 40) {
+                fertStatus.textContent = 'Moderate Stress';
+                fertStatus.style.color = '#e67e22';
+            } else {
+                fertStatus.textContent = 'Severe Stress!';
+                fertStatus.style.color = '#e74c3c';
+            }
+            
+            // Update field info
+            const densityRange = stageData.density;
+            const actualDensity = Math.round(densityRange[0] * tierData.density) + '-' + 
+                                  Math.round(densityRange[1] * tierData.density);
+            document.getElementById('field-density').textContent = actualDensity + ' plants/m²';
+            
+            document.getElementById('stress-tier').textContent = tier === 'ideal' ? 'Ideal' : 
+                                                                 tier === 'tier1' ? 'Minor' : 
+                                                                 tier === 'tier2' ? 'Moderate' : 
+                                                                 'Severe';
+            
+            const health = tier === 'ideal' ? 100 : tier === 'tier1' ? 85 : tier === 'tier2' ? 65 : 35;
+            document.getElementById('field-health').textContent = health + '%';
+        }
+
+        // Adjust irrigation
+        function adjustIrrigation(change) {
+            if (currentMode !== 'simulation') return;
+            
+            irrigationLevel = Math.max(0, Math.min(100, irrigationLevel + change));
+            document.getElementById('irrigation-percentage').textContent = irrigationLevel + '%';
+            document.getElementById('irrigation-bar').style.width = irrigationLevel + '%';
+            
+            // Update bar color
+            const bar = document.getElementById('irrigation-bar');
+            if (irrigationLevel >= 70) {
+                bar.style.background = 'var(--health-excellent)';
+            } else if (irrigationLevel >= 50) {
+                bar.style.background = '#f39c12';
+            } else if (irrigationLevel >= 30) {
+                bar.style.background = '#e67e22';
+            } else {
+                bar.style.background = '#e74c3c';
+            }
+            
+            // Sync with backend twin
+            syncToBackend();
+            
+            updateStressIndicators();
+            updateCropFieldStage(selectedStage);
+        }
+
+        // Adjust fertilization
+        function adjustFertilization(change) {
+            if (currentMode !== 'simulation') return;
+            
+            fertilizationLevel = Math.max(0, Math.min(100, fertilizationLevel + change));
+            document.getElementById('fertilization-percentage').textContent = fertilizationLevel + '%';
+            document.getElementById('fertilization-bar').style.width = fertilizationLevel + '%';
+            
+            // Update bar color
+            const bar = document.getElementById('fertilization-bar');
+            if (fertilizationLevel >= 80) {
+                bar.style.background = 'var(--health-excellent)';
+            } else if (fertilizationLevel >= 60) {
+                bar.style.background = '#f39c12';
+            } else if (fertilizationLevel >= 40) {
+                bar.style.background = '#e67e22';
+            } else {
+                bar.style.background = '#e74c3c';
+            }
+            
+            // Sync with backend twin
+            syncToBackend();
+            
+            updateStressIndicators();
+            updateCropFieldStage(selectedStage);
+        }
+        
+        // Sync changes to backend twin
+        function syncToBackend() {
+            fetch('/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mode: currentMode,
+                    irrigation: irrigationLevel,
+                    fertilization: fertilizationLevel,
+                    nasa_soil_moisture: nasaSoilMoisture,
+                    ndvi_mean: ndviMean
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Twin synced:', data);
+            })
+            .catch(error => {
+                console.error('Error syncing twin:', error);
+            });
+        }
+
+        // Toggle between Live and Simulation modes
+        function toggleTwinMode(isSimulation) {
+            currentMode = isSimulation ? 'simulation' : 'live';
+            
+            const liveInfo = document.getElementById('live-mode-info');
+            const stageSelector = document.getElementById('stage-selector-wrapper');
+            const simulationControls = document.getElementById('simulation-controls');
+            const modeDesc = document.getElementById('mode-description-text');
+            
+            console.log('🔄 toggleTwinMode called, isSimulation:', isSimulation);
+            
+            if (isSimulation) {
+                // SIMULATION MODE
+                // Set reasonable default values for experimentation
+                if (irrigationLevel < 50) irrigationLevel = 70;
+                if (fertilizationLevel < 50) fertilizationLevel = 70;
+                
+                // Update level displays
+                document.getElementById('irrigation-percentage').textContent = irrigationLevel + '%';
+                document.getElementById('fertilization-percentage').textContent = fertilizationLevel + '%';
+                document.getElementById('irrigation-bar').style.width = irrigationLevel + '%';
+                document.getElementById('fertilization-bar').style.width = fertilizationLevel + '%';
+                
+                liveInfo.style.display = 'none';
+                stageSelector.style.display = 'flex';
+                simulationControls.style.display = 'grid';
+                modeDesc.innerHTML = '<strong>🎮 SIMULATION MODE:</strong> Manually control irrigation, fertilization, and growth stage. Experiment with stress scenarios to see their effects on the 3D field.';
+                
+                console.log('🎮 Simulation mode UI updates:', {
+                    stageSelector: stageSelector,
+                    selectorDisplay: stageSelector.style.display,
+                    controlsDisplay: simulationControls.style.display,
+                    selectorVisible: stageSelector.offsetHeight > 0,
+                    descriptionUpdated: modeDesc.innerHTML.includes('SIMULATION')
+                });
+                
+                // Update indicators with current manual levels
+                updateStressIndicators();
+                
+                // Refresh 3D field with current settings
+                console.log('🎮 Simulation mode activated:', { stage: selectedStage, irrigation: irrigationLevel, fertilization: fertilizationLevel });
+                updateCropFieldStage(selectedStage);
+            } else {
+                // LIVE DATA MODE
+                liveInfo.style.display = 'grid';
+                stageSelector.style.display = 'none';
+                simulationControls.style.display = 'none';
+                
+                // Update description with GDD tooltip preserved
+                const gddText = cropData.gdd.toFixed(0);
+                const ageText = cropData.age_days.toFixed(1);
+                const moistureText = nasaSoilMoisture.toFixed(1);
+                
+                modeDesc.innerHTML = '<strong>🛰️ LIVE MODE:</strong> Field driven by real NASA soil moisture (' + moistureText + '%) and NDVI satellite data. Growth stage auto-calculated from ' + gddText + ' <span class="tooltip-container" style="display:inline;"><span style="text-decoration:underline; cursor:help;">GDD</span><span class="tooltip-text" style="width:280px;"><strong>📊 GDD = Growing Degree Days</strong><br>A measure of heat accumulation used to predict plant growth.<br><strong>Formula:</strong> Daily Temp (°C) - Base Temp (0°C)<br><strong>Example:</strong> 20°C day = 20 GDD added<br><a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a></span></span> (' + ageText + ' days old).';
+                
+                console.log('🛰️ Live mode UI updates:', {
+                    liveInfo: liveInfo,
+                    display: liveInfo.style.display,
+                    descriptionUpdated: modeDesc.innerHTML.includes('LIVE MODE')
+                });
+                
+                // Sync with twin state
+                syncWithTwinState();
+            }
+        }
+        
+        // Sync with twin state (Live Mode)
+        function syncWithTwinState() {
+            // Update from cropData (twin state)
+            selectedStage = cropData.stage;
+            irrigationLevel = Math.round(((cropData.soil_moisture - 5) / 65) * 100);
+            fertilizationLevel = Math.round(cropData.nitrogen);
+            
+            // Update displays
+            document.getElementById('irrigation-percentage').textContent = irrigationLevel + '%';
+            document.getElementById('fertilization-percentage').textContent = fertilizationLevel + '%';
+            document.getElementById('irrigation-bar').style.width = irrigationLevel + '%';
+            document.getElementById('fertilization-bar').style.width = fertilizationLevel + '%';
+            
+            // Update 3D field
+            updateCropFieldStage(selectedStage);
+            updateStressIndicators();
+        }
+
+        // Initialize Dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Dashboard initialization started');
+            console.log('📊 NDVI Data:', ndviData);
+            console.log('📈 Forecast Data:', forecastData);
+            console.log('🌍 Map Coords:', mapLat, mapLon);
+            console.log('📦 Libraries loaded:', {
+                Plotly: typeof Plotly,
+                THREE: typeof THREE,
+                L: typeof L,
+                Chart: typeof Chart
+            });
+            
+            try {
+                console.log('Initializing NDVI Heatmap...');
+            initNDVIHeatmap();
+                console.log('✅ NDVI Heatmap initialized');
+            } catch (e) {
+                console.error('❌ NDVI Heatmap failed:', e);
+            }
+            
+            try {
+                console.log('Initializing 3D Wheat Field...');
+                init3DWheatField(selectedStage);
+                console.log('✅ 3D Wheat Field initialized');
+            } catch (e) {
+                console.error('❌ 3D Wheat Field failed:', e);
+            }
+            
+            try {
+                console.log('Initializing Forecast Chart...');
+            initForecastChart();
+                console.log('✅ Forecast Chart initialized');
+            } catch (e) {
+                console.error('❌ Forecast Chart failed:', e);
+            }
+            
+            try {
+                console.log('Loading Satellite Image...');
+            loadSatelliteImage();
+                console.log('✅ Satellite Image loaded');
+            } catch (e) {
+                console.error('❌ Satellite Image failed:', e);
+            }
+            
+            // Start in Live Mode
+            document.getElementById('twin-mode-toggle').checked = false;
+            toggleTwinMode(false);
+            
+            // Set dropdown to current stage
+            document.getElementById('stage-dropdown').value = selectedStage;
+            
+            console.log('🎉 Dashboard initialization complete!');
+        });
+
+        // NDVI Heatmap with proper color mapping
+        function initNDVIHeatmap() {
+            console.log('📊 initNDVIHeatmap called');
+            console.log('📊 NDVI Data:', ndviData);
+            console.log('📊 NDVI Data type:', typeof ndviData, Array.isArray(ndviData));
+            
+            if (!ndviData || !Array.isArray(ndviData) || ndviData.length === 0) {
+                console.error('❌ NDVI Data is invalid or empty!');
+                document.getElementById('ndvi-heatmap').innerHTML = 
+                    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#e8ecf1;">❌ No NDVI data available</div>';
+                return;
+            }
+            
+            if (typeof Plotly === 'undefined') {
+                console.error('❌ Plotly is not loaded!');
+                return;
+            }
+            
+            const container = document.getElementById('ndvi-heatmap');
+            if (!container) {
+                console.error('❌ NDVI heatmap container not found!');
+                return;
+            }
+            
+            // Calculate min/max NDVI values for proper color mapping
+            let minNDVI = Infinity;
+            let maxNDVI = -Infinity;
+            let sumNDVI = 0;
+            let count = 0;
+            
+            ndviData.forEach(row => {
+                row.forEach(value => {
+                    minNDVI = Math.min(minNDVI, value);
+                    maxNDVI = Math.max(maxNDVI, value);
+                    sumNDVI += value;
+                    count++;
+                });
+            });
+            
+            const meanNDVI = sumNDVI / count;
+            console.log('📊 NDVI Stats:', { min: minNDVI.toFixed(3), max: maxNDVI.toFixed(3), mean: meanNDVI.toFixed(3) });
+            
+            // Enhanced colorscale for better visualization
+            // Maps NDVI values to vibrant colors matching the legend
+            const data = [{
+                z: ndviData,
+                type: 'heatmap',
+                colorscale: [
+                    [0.0, '#1a3a52'],    // Dark blue (0.0-0.2 range)
+                    [0.2, '#2d5a7b'],    // Blue (0.2)
+                    [0.3, '#3a7b8c'],    // Blue-teal transition (0.3)
+                    [0.4, '#4a8c6f'],    // Teal (0.4)
+                    [0.5, '#5fa05f'],    // Teal-green (0.5)
+                    [0.6, '#84b574'],    // Green (0.6)
+                    [0.7, '#a5c96e'],    // Bright green (0.7)
+                    [0.8, '#c9d96e'],    // Yellow-green (0.8)
+                    [1.0, '#e8f26e']     // Bright yellow-green (0.9-1.0)
+                ],
+                zmin: 0.0,               // Force minimum scale value
+                zmax: 1.0,               // Force maximum scale value
+                zauto: false,            // Disable auto-scaling
+                showscale: true,
+                colorbar: {
+                    thickness: 20,
+                    len: 0.8,
+                    bgcolor: 'rgba(26,58,82,0.3)',
+                    bordercolor: '#52c196',
+                    borderwidth: 1,
+                    tickmode: 'array',
+                    tickvals: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                    ticktext: ['0.0', '0.2', '0.4', '0.6', '0.8', '1.0'],
+                    tickfont: { 
+                        color: '#e8ecf1',
+                        size: 11,
+                        family: 'Inter, sans-serif'
+                    },
+                    title: {
+                        text: 'NDVI',
+                        side: 'right',
+                        font: { color: '#52c196', size: 12, weight: 600 }
+                    }
+                },
+                hovertemplate: '<b>Position</b><br>Row: %{y}<br>Col: %{x}<br><b>NDVI: %{z:.3f}</b><br>' +
+                              '<i>%{customdata}</i><extra></extra>',
+                customdata: ndviData.map(row => row.map(v => {
+                    if (v < 0.2) return 'Bare soil';
+                    if (v < 0.3) return 'Very sparse';
+                    if (v < 0.4) return 'Sparse vegetation';
+                    if (v < 0.6) return 'Moderate vegetation';
+                    if (v < 0.7) return 'Healthy crops';
+                    return 'Very healthy';
+                })),
+                hoverlabel: {
+                    bgcolor: '#1a3a52',
+                    bordercolor: '#52c196',
+                    font: { color: '#e8ecf1', size: 12 }
+                }
+            }];
+
+            const layout = {
+                paper_bgcolor: 'rgba(26,58,82,0.1)',
+                plot_bgcolor: '#0f1419',
+                margin: { l: 50, r: 80, t: 30, b: 50 },
+                xaxis: { 
+                    showgrid: true, 
+                    gridcolor: 'rgba(82,193,150,0.1)',
+                    zeroline: false, 
+                    color: '#a8b2bd',
+                    title: { 
+                        text: 'Field Width (10m grid)', 
+                        font: { size: 11, color: '#a8b2bd' }
+                    },
+                    tickfont: { size: 10, color: '#a8b2bd' }
+                },
+                yaxis: { 
+                    showgrid: true,
+                    gridcolor: 'rgba(82,193,150,0.1)',
+                    zeroline: false, 
+                    color: '#a8b2bd',
+                    autorange: 'reversed',  // Flip Y-axis to match field orientation
+                    title: { 
+                        text: 'Field Length (10m grid)', 
+                        font: { size: 11, color: '#a8b2bd' }
+                    },
+                    tickfont: { size: 10, color: '#a8b2bd' }
+                },
+                font: {
+                    family: 'Inter, sans-serif',
+                    color: '#e8ecf1'
+                }
+            };
+
+            console.log('📊 Calling Plotly.newPlot with enhanced colorscale...');
+            Plotly.newPlot('ndvi-heatmap', data, layout, {
+                responsive: true,
+                displayModeBar: false
+            }).then(() => {
+                console.log('✅ Plotly.newPlot completed successfully');
+                console.log('📊 Heatmap rendered with data range:', minNDVI.toFixed(3), '-', maxNDVI.toFixed(3));
+            }).catch((err) => {
+                console.error('❌ Plotly.newPlot error:', err);
+            });
+        }
+
+        // Forecast Chart with visible hover values
+        function initForecastChart() {
+            console.log('📈 initForecastChart called, data:', forecastData);
+            
+            // Create day labels (Day 1, Day 2, etc.)
+            const dayLabels = forecastData.map((f, i) => `Day ${i + 1}`);
+            
+            // Keep full date info for hover
+            const fullDates = forecastData.map(f => {
+                const date = new Date(f.ds);
+                return date.toLocaleDateString('en-US', { 
+                    weekday: 'short',
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+            });
+            
+            const values = forecastData.map(f => f.yhat);
+            const yhat_lower = forecastData.map(f => f.yhat_lower || f.yhat - 5);
+            const yhat_upper = forecastData.map(f => f.yhat_upper || f.yhat + 5);
+            
+            const trace = {
+                x: dayLabels,
+                y: values,
+                mode: 'lines+markers',
+                name: 'Predicted Moisture',
+                line: {
+                    color: '#52c196',
+                    width: 3,
+                    shape: 'spline'
+                },
+                marker: {
+                    size: 8,
+                    color: '#52c196'
+                },
+                customdata: fullDates.map((date, i) => [date, yhat_lower[i], yhat_upper[i]]),
+                hovertemplate: '<b>%{customdata[0]}</b><br>' +
+                              'Predicted: %{y:.1f}%<br>' +
+                              'Range: %{customdata[1]:.1f}% - %{customdata[2]:.1f}%' +
+                              '<extra></extra>'
+            };
+            
+            const threshold = {
+                x: dayLabels,
+                y: Array(dayLabels.length).fill(25),
+                mode: 'lines',
+                name: 'Critical Level (25%)',
+                line: {
+                    color: '#c76b6b',
+                    width: 2,
+                    dash: 'dash'
+                },
+                hoverinfo: 'skip'
+            };
+            
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { l: 50, r: 30, t: 10, b: 60 },
+                xaxis: {
+                    title: 'Forecast Period',
+                    showgrid: true,
+                    gridcolor: '#2d3742',
+                    color: '#a8b2bd',
+                    tickfont: { size: 12 }
+                },
+                yaxis: {
+                    title: 'Moisture (%)',
+                    showgrid: true,
+                    gridcolor: '#2d3742',
+                    color: '#a8b2bd'
+                },
+                showlegend: false,
+                hovermode: 'closest',
+                hoverlabel: {
+                    bgcolor: '#1e2329',
+                    bordercolor: '#52c196',
+                    font: { 
+                        color: '#e8ecf0',
+                        size: 14
+                    }
+                }
+            };
+            
+            Plotly.newPlot('forecast-chart', [trace, threshold], layout, {
+                responsive: true,
+                displayModeBar: false
+            });
+        }
+
+        // 3D Wheat Field Visualization
+        let scene, camera, renderer, fieldGroup, controls;
+        
+        // Fixed plant positions (generated once, reused for consistency)
+        let plantPositions = null;
+        
+        // Seeded random number generator for consistent positions
+        function seededRandom(seed) {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        }
+        
+        // Generate fixed plant positions once
+        function generatePlantPositions(gridSize, spacing) {
+            if (plantPositions) return plantPositions;
+            
+            const positions = [];
+            let seed = 12345; // Fixed seed for reproducible results
+            
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    const x = (col - gridSize/2) * spacing + (seededRandom(seed++) - 0.5) * 0.3;
+                    const z = (row - gridSize/2) * spacing + (seededRandom(seed++) - 0.5) * 0.3;
+                    const rotation = seededRandom(seed++) * Math.PI * 2;
+                    
+                    positions.push({
+                        row: row,
+                        col: col,
+                        x: x,
+                        z: z,
+                        rotation: rotation,
+                        seed: seed
+                });
+            }
+        }
+
+            plantPositions = positions;
+            return positions;
+        }
+        
+        function init3DWheatField(stageName) {
+            console.log('🌾 init3DWheatField called, stage:', stageName);
+            const container = document.getElementById('wheat-field-3d');
+            console.log('Container element:', container);
+            const stageData = GROWTH_STAGES[stageName];
+            console.log('Stage data:', stageData);
+            const tierName = calculateStressTier(irrigationLevel, fertilizationLevel, stageName);
+            const tier = stageData.tiers[tierName];
+            
+            scene = new THREE.Scene();
+            scene.background = null;
+            scene.fog = new THREE.Fog(0x1a1f26, 15, 35); // Subtle depth fog
+            
+            // Camera
+            camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(10, 8, 14);
+            camera.lookAt(0, 2, 0);
+            
+            // Renderer with better quality settings
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true, 
+                alpha: true,
+                powerPreference: "high-performance"
+            });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            container.appendChild(renderer.domElement);
+            
+            // ORBIT CONTROLS - Makes field rotatable!
+            // Note: OrbitControls loaded, will be instantiated below
+            try {
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+            } catch (e) {
+                console.warn('OrbitControls not available, using basic camera');
+                controls = null;
+            }
+            
+            if (controls) {
+                // Enable all orbit controls features
+                controls.enabled = true;
+                
+                // Rotation (left mouse drag)
+                controls.enableRotate = true;
+                controls.rotateSpeed = 0.5;
+                
+                // Zoom (mouse wheel)
+                controls.enableZoom = true;
+                controls.zoomSpeed = 1.0;
+                controls.minDistance = 5;
+                controls.maxDistance = 30;
+                
+                // Pan (right mouse drag or Shift + left mouse)
+                controls.enablePan = true;
+                controls.panSpeed = 0.8;
+                controls.screenSpacePanning = true;
+                
+                // Smooth controls
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.08;
+                
+                // Limits
+                controls.maxPolarAngle = Math.PI / 2.2; // Don't go below ground
+                controls.target.set(0, 2, 0);
+                
+                // Mouse button assignments
+                controls.mouseButtons = {
+                    LEFT: THREE.MOUSE.ROTATE,
+                    MIDDLE: THREE.MOUSE.DOLLY,
+                    RIGHT: THREE.MOUSE.PAN
+                };
+                
+                console.log('✅ OrbitControls initialized with full features');
+            }
+            
+            // Enhanced Lighting for realism
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+            
+            // Main sun light
+            const sunLight = new THREE.DirectionalLight(0xfff4e6, 1.2);
+            sunLight.position.set(12, 20, 8);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 50;
+            sunLight.shadow.camera.left = -15;
+            sunLight.shadow.camera.right = 15;
+            sunLight.shadow.camera.top = 15;
+            sunLight.shadow.camera.bottom = -15;
+            sunLight.shadow.bias = -0.0001;
+            scene.add(sunLight);
+            
+            // Sky fill light (bluish)
+            const skyLight = new THREE.HemisphereLight(0x87ceeb, 0x6b5d4f, 0.6);
+            scene.add(skyLight);
+            
+            // Warm fill light
+            const fillLight = new THREE.DirectionalLight(0xffb366, 0.3);
+            fillLight.position.set(-8, 5, -10);
+            scene.add(fillLight);
+            
+            // Ground (Soil with texture-like appearance)
+            const groundGeometry = new THREE.PlaneGeometry(24, 24, 32, 32);
+            
+            // Add slight terrain variation
+            const vertices = groundGeometry.attributes.position.array;
+            for (let i = 0; i < vertices.length; i += 3) {
+                vertices[i + 2] = Math.random() * 0.1 - 0.05; // Small height variation
+            }
+            groundGeometry.attributes.position.needsUpdate = true;
+            groundGeometry.computeVertexNormals();
+            
+            const groundMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x6b5d4f,
+                roughness: 0.95,
+                metalness: 0.05,
+                flatShading: false
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+            
+            // Create wheat field
+            fieldGroup = new THREE.Group();
+            createRealisticWheatField(stageName, tier);
+            scene.add(fieldGroup);
+            
+            // Animation loop
+            animate();
+            
+            // Handle resize
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+        }
+
+        // Create photorealistic wheat leaf
+        function createRealisticLeaf(length, width, baseColor, healthFactor) {
+            const leafGroup = new THREE.Group();
+            
+            // Leaf blade with segments for natural curve
+            const segments = 12;
+            const leafShape = new THREE.Shape();
+            
+            // Create leaf-like shape (tapered at tip)
+            const halfWidth = width / 2;
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const widthAtPoint = halfWidth * (1 - t * 0.3); // Taper towards tip
+                const x = widthAtPoint * Math.sin(t * Math.PI);
+                const y = t * length;
+                
+                if (i === 0) {
+                    leafShape.moveTo(x, y);
+                } else {
+                    leafShape.lineTo(x, y);
+                }
+            }
+            
+            // Complete the shape
+            for (let i = segments; i >= 0; i--) {
+                const t = i / segments;
+                const widthAtPoint = halfWidth * (1 - t * 0.3);
+                const x = -widthAtPoint * Math.sin(t * Math.PI);
+                const y = t * length;
+                leafShape.lineTo(x, y);
+            }
+            
+            const extrudeSettings = {
+                depth: 0.01,
+                bevelEnabled: true,
+                bevelThickness: 0.005,
+                bevelSize: 0.005,
+                bevelSegments: 2
+            };
+            
+            const leafGeometry = new THREE.ExtrudeGeometry(leafShape, extrudeSettings);
+            
+            // Color varies with health
+            const leafColor = new THREE.Color(baseColor);
+            if (healthFactor < 0.6) {
+                leafColor.lerp(new THREE.Color(0xb8b857), 0.3); // Yellow tint
+            }
+            if (healthFactor < 0.4) {
+                leafColor.lerp(new THREE.Color(0xa67c52), 0.4); // Brown tint
+            }
+            
+            const leafMaterial = new THREE.MeshStandardMaterial({
+                color: leafColor,
+                roughness: 0.75,
+                metalness: 0.1,
+                side: THREE.DoubleSide,
+                flatShading: false
+            });
+            
+            const leafMesh = new THREE.Mesh(leafGeometry, leafMaterial);
+            leafMesh.castShadow = true;
+            leafMesh.receiveShadow = true;
+            
+            // Add central vein (midrib)
+            const veinGeometry = new THREE.CylinderGeometry(0.008, 0.008, length, 6);
+            const veinMaterial = new THREE.MeshStandardMaterial({
+                color: leafColor.clone().multiplyScalar(0.7),
+                roughness: 0.9
+            });
+            const vein = new THREE.Mesh(veinGeometry, veinMaterial);
+            vein.position.y = length / 2;
+            vein.rotation.z = Math.PI / 2;
+            
+            leafGroup.add(leafMesh);
+            leafGroup.add(vein);
+            
+            return leafGroup;
+        }
+        
+        // Create realistic wheat grain head
+        function createWheatHead(stage, healthFactor) {
+            const headGroup = new THREE.Group();
+            
+            // Grain color based on stage
+            let grainColor = 0x9db896; // Green (heading)
+            if (stage === 'grain_filling') {
+                grainColor = 0xd4a574; // Golden (grain filling)
+            }
+            
+            // Individual grains (spikelets)
+            const grainsPerHead = 20;
+            const headLength = 0.6;
+            
+            for (let i = 0; i < grainsPerHead; i++) {
+                const t = i / grainsPerHead;
+                const heightPos = t * headLength;
+                
+                // Grain geometry (small elongated shape)
+                // Create custom capsule using cylinder + spheres (CapsuleGeometry doesn't exist in Three.js r128)
+                const grainMaterial = new THREE.MeshStandardMaterial({
+                    color: grainColor,
+                    roughness: 0.7,
+                    metalness: 0.05
+                });
+                
+                const grain = new THREE.Group();
+                
+                // Center cylinder
+                const cylinderGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.08, 8);
+                const cylinder = new THREE.Mesh(cylinderGeometry, grainMaterial);
+                grain.add(cylinder);
+                
+                // Top hemisphere
+                const topSphereGeometry = new THREE.SphereGeometry(0.03, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+                const topSphere = new THREE.Mesh(topSphereGeometry, grainMaterial);
+                topSphere.position.y = 0.04;
+                grain.add(topSphere);
+                
+                // Bottom hemisphere
+                const bottomSphereGeometry = new THREE.SphereGeometry(0.03, 8, 4, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+                const bottomSphere = new THREE.Mesh(bottomSphereGeometry, grainMaterial);
+                bottomSphere.position.y = -0.04;
+                grain.add(bottomSphere);
+                
+                // Position grains in spiral around central rachis
+                const angle = (i / grainsPerHead) * Math.PI * 4;
+                const radius = 0.06;
+                grain.position.set(
+                    Math.cos(angle) * radius,
+                    heightPos,
+                    Math.sin(angle) * radius
+                );
+                grain.rotation.z = angle;
+                grain.rotation.x = Math.PI / 8;
+                grain.castShadow = true;
+                
+                // Awns (whisker-like extensions)
+                const awnGeometry = new THREE.CylinderGeometry(0.003, 0.001, 0.4, 4);
+                const awnMaterial = new THREE.MeshStandardMaterial({
+                    color: 0xc9b896,
+                    roughness: 0.9
+                });
+                const awn = new THREE.Mesh(awnGeometry, awnMaterial);
+                awn.position.copy(grain.position);
+                awn.position.y += 0.15;
+                awn.rotation.x = Math.PI / 6 + Math.random() * 0.2;
+                awn.rotation.z = angle + Math.random() * 0.3;
+                
+                headGroup.add(grain);
+                headGroup.add(awn);
+            }
+            
+            // Central rachis (main stem of head)
+            const rachisGeometry = new THREE.CylinderGeometry(0.02, 0.025, headLength, 8);
+            const rachisMaterial = new THREE.MeshStandardMaterial({
+                color: 0x9db896,
+                roughness: 0.8
+            });
+            const rachis = new THREE.Mesh(rachisGeometry, rachisMaterial);
+            rachis.position.y = headLength / 2;
+            rachis.castShadow = true;
+            headGroup.add(rachis);
+            
+            return headGroup;
+        }
+        
+        // Create realistic wheat field connected to NDVI heatmap
+        function createRealisticWheatField(stageName, tier) {
+            const stageData = GROWTH_STAGES[stageName];
+            const gridSize = 10;
+            const spacing = 1.8;
+            const baseDensity = tier.density;
+            const baseColor = tier.color;
+            const heightMultiplier = tier.height;
+            
+            console.log('🌾 createRealisticWheatField:', { stageName, tierDensity: baseDensity, tierColor: baseColor, tierHeight: heightMultiplier });
+            
+            const avgHeight = (stageData.heightRange[0] + stageData.heightRange[1]) / 2;
+            const stemHeight = (avgHeight / 15) * heightMultiplier;
+            
+            // Get NDVI grid data for per-plant health
+            const ndviGrid = ndviData;
+            const hasNDVI = ndviGrid && ndviGrid.length > 0;
+            
+            // Get or generate fixed plant positions
+            const positions = generatePlantPositions(gridSize, spacing);
+            
+            // Use seeded random for consistent density checks
+            let densitySeed = 54321;
+            
+            // CRITICAL FIX: Ensure minimum absolute density of 55% for ALL stages
+            // This guarantees field is never empty, especially for heading/grain_filling
+            const guaranteedMinDensity = 0.55;
+            
+            let plantsCreated = 0;
+            let plantsSkipped = 0;
+            
+            for (let i = 0; i < positions.length; i++) {
+                const pos = positions[i];
+                const row = pos.row;
+                const col = pos.col;
+                
+                // Get NDVI value for this position
+                let localHealth = 1.0;
+                if (hasNDVI) {
+                    const ndviRow = Math.floor((row / gridSize) * ndviGrid.length);
+                    const ndviCol = Math.floor((col / gridSize) * ndviGrid[0].length);
+                    const ndviValue = ndviGrid[ndviRow][ndviCol];
+                    localHealth = Math.max(0.3, Math.min(1.0, ndviValue));
+                }
+                
+                // Density calculation with GUARANTEED minimum
+                // Use Math.max to ensure we NEVER go below 55% density
+                const calculatedDensity = baseDensity * localHealth;
+                const plantDensity = Math.max(guaranteedMinDensity, calculatedDensity);
+                
+                // Skip plant based on density (but guaranteed minimum ensures visibility)
+                const randomValue = seededRandom(densitySeed + i);
+                if (randomValue > plantDensity) {
+                    plantsSkipped++;
+                    continue;
+                }
+                
+                plantsCreated++;
+                
+                const plantGroup = new THREE.Group();
+                
+                // Use pre-calculated fixed positions
+                plantGroup.position.set(pos.x, 0, pos.z);
+                plantGroup.rotation.y = pos.rotation;
+                    
+                    // Main stem with texture
+                    const stemSegments = 12;
+                    const stemGeometry = new THREE.CylinderGeometry(
+                        0.04, 0.06, stemHeight, stemSegments
+                    );
+                    
+                    // Color varies with local NDVI
+                    const stemColor = new THREE.Color(baseColor);
+                    if (localHealth < 0.7) {
+                        stemColor.lerp(new THREE.Color(0xb8b857), 0.3);
+                    }
+                    
+                    const stemMaterial = new THREE.MeshStandardMaterial({
+                        color: stemColor,
+                        roughness: 0.85,
+                        metalness: 0.05
+                    });
+                    
+                    const stem = new THREE.Mesh(stemGeometry, stemMaterial);
+                    stem.position.y = stemHeight / 2;
+                    stem.castShadow = true;
+                    stem.receiveShadow = true;
+                    plantGroup.add(stem);
+                    
+                    // Realistic leaves (use seeded random for consistency)
+                    let leafSeed = pos.seed + 1000;
+                    const numLeaves = Math.floor((5 + seededRandom(leafSeed++) * 4) * localHealth);
+                    for (let leafIdx = 0; leafIdx < numLeaves; leafIdx++) {
+                        const leafLength = 0.8 + seededRandom(leafSeed++) * 0.4;
+                        const leafWidth = 0.12 + seededRandom(leafSeed++) * 0.05;
+                        const leaf = createRealisticLeaf(leafLength, leafWidth, baseColor, localHealth);
+                        
+                        const angle = (leafIdx / numLeaves) * Math.PI * 2 + seededRandom(leafSeed++) * 0.3;
+                        const heightOffset = (leafIdx / numLeaves) * stemHeight * 0.7;
+                        
+                        leaf.position.set(
+                            0,
+                            heightOffset + 0.1,
+                            0
+                        );
+                        leaf.rotation.y = angle;
+                        leaf.rotation.x = -Math.PI / 4 - seededRandom(leafSeed++) * 0.2;
+                        leaf.rotation.z = seededRandom(leafSeed++) * 0.2 - 0.1;
+                        
+                        plantGroup.add(leaf);
+                    }
+                    
+                    // Wheat heads for later stages
+                    if (['heading', 'grain_filling'].includes(stageName)) {
+                        const head = createWheatHead(stageName, localHealth);
+                        head.position.y = stemHeight;
+                        head.rotation.x = -0.1 + seededRandom(pos.seed + 2000) * 0.2;
+                        plantGroup.add(head);
+                    }
+                    
+                    // Tillers (additional stems) for tillering stage
+                    if (['tillering', 'stem_elongation'].includes(stageName)) {
+                        let tillerSeed = pos.seed + 3000;
+                        const numTillers = Math.floor(2 + seededRandom(tillerSeed++) * 3);
+                        for (let t = 0; t < numTillers; t++) {
+                            const tillerHeight = stemHeight * (0.7 + seededRandom(tillerSeed++) * 0.3);
+                            const tillerGeometry = new THREE.CylinderGeometry(0.03, 0.04, tillerHeight, 8);
+                            const tiller = new THREE.Mesh(tillerGeometry, stemMaterial);
+                            
+                            const tillerAngle = (t / numTillers) * Math.PI * 2;
+                            tiller.position.set(
+                                Math.cos(tillerAngle) * 0.1,
+                                tillerHeight / 2,
+                                Math.sin(tillerAngle) * 0.1
+                            );
+                            tiller.rotation.z = 0.1;
+                            tiller.castShadow = true;
+                            plantGroup.add(tiller);
+                        }
+                    }
+                    
+                    fieldGroup.add(plantGroup);
+            }
+            
+            console.log('🌾 Field generation complete:', { 
+                stageName, 
+                plantsCreated, 
+                plantsSkipped, 
+                totalPositions: positions.length,
+                finalDensity: (plantsCreated / positions.length * 100).toFixed(1) + '%',
+                baseDensity: (baseDensity * 100).toFixed(1) + '%'
+            });
+        }
+            
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update orbit controls
+            if (controls) {
+                controls.update();
+            }
+            
+            // Gentle swaying animation (wind effect)
+            if (fieldGroup) {
+                const time = Date.now() * 0.0003;
+                fieldGroup.children.forEach((plant, index) => {
+                    // Each plant sways slightly differently (wind effect)
+                    const offset = index * 0.1;
+                    plant.rotation.z = Math.sin(time + offset) * 0.03;
+                    plant.rotation.x = Math.cos(time * 0.7 + offset) * 0.02;
+                });
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        function updateCropFieldStage(newStage) {
+            selectedStage = newStage;
+            const stageData = GROWTH_STAGES[newStage];
+            const tierName = calculateStressTier(irrigationLevel, fertilizationLevel, newStage);
+            const tier = stageData.tiers[tierName];
+            
+            console.log('🌾 updateCropFieldStage called:', { 
+                stage: newStage, 
+                tierName: tierName, 
+                tierDensity: tier.density,
+                tierColor: tier.color,
+                tierHeight: tier.height,
+                irrigation: irrigationLevel, 
+                fertilization: fertilizationLevel 
+            });
+            
+            // Clear existing field
+            const oldPlantCount = fieldGroup.children.length;
+            while(fieldGroup.children.length > 0) {
+                fieldGroup.remove(fieldGroup.children[0]);
+            }
+            console.log('🗑️ Cleared old field, removed', oldPlantCount, 'plants');
+            
+            // Create new realistic field
+            console.log('🌱 Creating new field...');
+            createRealisticWheatField(newStage, tier);
+            
+            console.log('✅ Field updated! New plant count:', fieldGroup.children.length);
+            
+            if (fieldGroup.children.length === 0) {
+                console.error('❌ ERROR: No plants were created! This should never happen with 55% minimum density.');
+                console.error('❌ Debug info:', { stage: newStage, tierName, tier, irrigation: irrigationLevel, fertilization: fertilizationLevel });
+            }
+            
+            // Update info panel
+            document.getElementById('current-stage-name').textContent = stageData.name;
+            updateStressIndicators();
+        }
+
+        // Load Satellite Image
+        let satelliteMap = null;
+        const mapLat = {{ config.LOCATION_COORDS.lat }};
+        const mapLon = {{ config.LOCATION_COORDS.lon }};
+        
+        function loadSatelliteImage() {
+            console.log('🛰️ loadSatelliteImage called, coords:', mapLat, mapLon);
+            const lat = mapLat;
+            const lon = mapLon;
+            
+            if (!satelliteMap) {
+                satelliteMap = L.map('satellite-rgb-image', {
+                    center: [lat, lon],
+                    zoom: 16,
+                    zoomControl: false,
+                    attributionControl: true
+                });
+                
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 19
+                }).addTo(satelliteMap);
+                
+                const marker = L.circleMarker([lat, lon], {
+                    radius: 8,
+                    fillColor: '#4ade80',
+                    color: '#ffffff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(satelliteMap);
+                
+                L.circle([lat, lon], {
+                    radius: 100,
+                    fillColor: '#4ade80',
+                    color: '#4ade80',
+                    weight: 2,
+                    opacity: 0.6,
+                    fillOpacity: 0.1
+                }).addTo(satelliteMap);
+            }
+        }
+        
+        function zoomSatelliteMap(direction) {
+            if (satelliteMap) {
+                if (direction === 'in') {
+                    satelliteMap.zoomIn();
+                } else if (direction === 'out') {
+                    satelliteMap.zoomOut();
+                }
+            }
+        }
+        
+        function resetSatelliteMap() {
+            if (satelliteMap) {
+                satelliteMap.setView([mapLat, mapLon], 16);
+            }
+        }
+
+        function refreshDashboard() {
+            fetch('/refresh', { method: 'POST' })
+                .then(() => window.location.reload());
+        }
+        
+        // Location Search Function
+        async function searchLocation() {
+            const input = document.getElementById('location-search-input');
+            const result = document.getElementById('location-search-result');
+            const locationNameDisplay = document.getElementById('current-location-name');
+            
+            const inputValue = input.value.trim();
+            
+            if (!inputValue) {
+                result.className = 'location-search-result error';
+                result.textContent = '⚠️ Please enter coordinates';
+                return;
+            }
+            
+            // Parse input (expect: "lat, lon" or "lat,lon" or "lat lon")
+            const coords = inputValue.split(/[,\s]+/).map(s => s.trim());
+            
+            if (coords.length !== 2) {
+                result.className = 'location-search-result error';
+                result.textContent = '⚠️ Invalid format. Use: latitude, longitude (e.g., 26.974583, 83.529583)';
+                return;
+            }
+            
+            const lat = parseFloat(coords[0]);
+            const lon = parseFloat(coords[1]);
+            
+            if (isNaN(lat) || isNaN(lon)) {
+                result.className = 'location-search-result error';
+                result.textContent = '⚠️ Invalid numbers. Please enter decimal degrees (e.g., 26.974583, 83.529583)';
+                return;
+            }
+            
+            // Validate lat/lon ranges
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                result.className = 'location-search-result error';
+                result.textContent = '⚠️ Invalid range. Latitude: -90 to 90, Longitude: -180 to 180';
+                return;
+            }
+            
+            // Show loading
+            result.className = 'location-search-result success';
+            result.textContent = '🔍 Searching location...';
+            
+            try {
+                // Step 1: Reverse geocode to get location name
+                const geocodeResponse = await fetch('/api/geocode', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ lat, lon })
+                });
+                
+                const geocodeData = await geocodeResponse.json();
+                
+                if (geocodeData.success) {
+                    // Show intermediate result
+                    let message = `✅ Found: ${geocodeData.location.name}<br>`;
+                    message += `📍 ${geocodeData.coordinates.dms.lat}, ${geocodeData.coordinates.dms.lon}`;
+                    
+                    if (!geocodeData.validation.is_in_india) {
+                        result.className = 'location-search-result warning';
+                        message += `<br><br>${geocodeData.validation.warning}`;
+                    } else {
+                        result.className = 'location-search-result success';
+                    }
+                    
+                    message += '<br><br>💾 Updating location...';
+                    result.innerHTML = message;
+                    
+                    // Step 2: Update the location configuration
+                    const updateResponse = await fetch('/api/update-location', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            lat: lat,
+                            lon: lon,
+                            location_name: geocodeData.location.name,
+                            dms_lat: geocodeData.coordinates.dms.lat,
+                            dms_lon: geocodeData.coordinates.dms.lon
+                        })
+                    });
+                    
+                    const updateData = await updateResponse.json();
+                    
+                    if (updateData.success) {
+                        // Show success message and reload
+                        result.className = 'location-search-result success';
+                        result.innerHTML = `✅ Location updated successfully!<br>🔄 Reloading dashboard...`;
+                        
+                        // Clear input
+                        input.value = '';
+                        
+                        console.log('📍 Location updated, reloading page...');
+                        
+                        // Reload page after a short delay
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        result.className = 'location-search-result error';
+                        result.textContent = `❌ ${updateData.error}`;
+                    }
+                } else {
+                    result.className = 'location-search-result error';
+                    result.textContent = `❌ ${geocodeData.error}`;
+                }
+            } catch (error) {
+                result.className = 'location-search-result error';
+                result.textContent = `❌ Error: ${error.message}`;
+                console.error('Location search error:', error);
+            }
+        }
+        
+        // Allow Enter key to trigger search
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('location-search-input');
+            if (input) {
+                input.addEventListener('keypress', function(event) {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        searchLocation();
+                    }
+                });
+            }
+        });
+        
+        // FAQ Toggle Function
+        function toggleFAQ(button) {
+            const answer = button.nextElementSibling;
+            const icon = button.querySelector('.faq-icon');
+            const isOpen = answer.style.maxHeight;
+            
+            // Close all other FAQs
+            document.querySelectorAll('.faq-answer').forEach(a => {
+                a.style.maxHeight = null;
+                a.style.padding = '0 20px';
+            });
+            document.querySelectorAll('.faq-icon').forEach(i => {
+                i.textContent = '+';
+            });
+            document.querySelectorAll('.faq-question').forEach(q => {
+                q.classList.remove('active');
+            });
+            
+            // Toggle current FAQ
+            if (!isOpen) {
+                answer.style.maxHeight = answer.scrollHeight + 'px';
+                answer.style.padding = '20px';
+                icon.textContent = '−';
+                button.classList.add('active');
+            }
+        }
+    </script>
+
+</body>
+</html>
+
