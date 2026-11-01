@@ -1,40 +1,46 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-dist/
-build/
-
-# Virtual Environment
+# Python environments
+.venv/
 dt_env/
 venv/
-env/
 
-# Dynamic Configuration
-location_config.json
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+credentials.json
+service-account*.json
+*.pem
+*.key
+
+# Logs and system files
+*.log
+.DS_Store
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Cache
+# FarmSight generated data
+location_config.json
 ndvi_cache.json
+
+# Serialized models
 *.pkl
 
-# Environment variables
-.env
-.env.local
+# Python environments
+.venv/
+dt_env/
+venv/
 
+# Secrets
+.env
+.env.*
+!.env.example
+credentials.json
+service-account*.json
+*.pem
+*.key

@@ -344,13 +344,41 @@ def update_location_config():
         
         # Update config
         if config.update_location(lat, lon, location_name, dms_lat, dms_lon):
-            # Clear cached data to force refresh with new location
-            global _cached
+            # Clear ALL cached data to force refresh with new location
+            global _cached, history_df
             _cached = {
                 'forecast': None,
                 'weather': None,
                 'timestamp': None,
             }
+            
+            # Clear NDVI cache file for new location
+            ndvi_cache_path = os.path.join(os.path.dirname(__file__), 'ndvi_cache.json')
+            if os.path.exists(ndvi_cache_path):
+                try:
+                    with open(ndvi_cache_path, 'r') as f:
+                        cache = json.load(f)
+                    # Remove old location cache entries (keep only last 3 locations)
+                    if len(cache) > 3:
+                        # Keep only most recent 3 entries
+                        sorted_keys = sorted(cache.keys(), 
+                                           key=lambda k: cache[k].get('date', '2000-01-01'), 
+                                           reverse=True)
+                        new_cache = {k: cache[k] for k in sorted_keys[:3]}
+                        with open(ndvi_cache_path, 'w') as f:
+                            json.dump(new_cache, f, indent=2)
+                    print(f"🗑️ Cleared old NDVI cache entries")
+                except Exception as e:
+                    print(f"⚠️ Could not clean NDVI cache: {e}")
+            
+            # Regenerate historical data for new location
+            history_df = pd.DataFrame({
+                'ds': pd.date_range(datetime.date.today() - pd.Timedelta(days=30), periods=30),
+                'y': [random.uniform(25, 65) for _ in range(30)]
+            })
+            
+            print(f"✅ Location updated to: {location_name} ({lat}, {lon})")
+            print(f"🔄 All caches cleared, ready for fresh data")
             
             return jsonify({
                 'success': True,

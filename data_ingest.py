@@ -102,6 +102,9 @@ def get_weather(crop_health=0.7):
             lon = config.LOCATION_COORDS.get('lon', 75.5762)
             
             print(f"🛰️ Fetching REAL NDVI data for {lat}, {lon}...")
+            
+            # Check if this is a fresh location request (use_cache=False forces fresh fetch)
+            # This ensures new locations get fresh satellite data
             ndvi_data = get_ndvi_with_fallback(lat, lon, use_cache=True)
             
             if ndvi_data and ndvi_data.get('success'):

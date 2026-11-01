@@ -7,7 +7,7 @@ INITIAL_HEIGHT = 5      # cm
 INITIAL_HEALTH = 100    # percent
 
 WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
-WEATHER_API_KEY = "1ede7875ab3fd55ed7fae78a36c343a1"   # Set your own key
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") # Set your own key
 
 # Location configuration file
 _LOCATION_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'location_config.json')

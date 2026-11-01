@@ -906,6 +906,47 @@ kbd {
     to { transform: translateX(100%); opacity: 0; }
 }
 
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; visibility: hidden; }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ========================================
+   LEAFLET MAP ENHANCEMENTS
+   ======================================== */
+
+/* Leaflet popup styling for dark theme */
+.leaflet-popup-content-wrapper {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+}
+
+.leaflet-popup-tip {
+    background: var(--bg-card) !important;
+}
+
+.leaflet-popup-content {
+    margin: 16px !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Interactive map cursor hint */
+#satellite-rgb-image {
+    transition: opacity 0.3s ease;
+}
+
+#satellite-rgb-image:hover {
+    opacity: 0.95;
+}
+
 /* ========================================
    MODE TOGGLE SWITCH
    ======================================== */

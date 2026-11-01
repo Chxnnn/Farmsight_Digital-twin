@@ -98,18 +98,31 @@
                                 🛰️ Satellite View
                                 <span class="tooltip-container">
                                     <span class="help-icon">?</span>
-                                <span class="tooltip-text tooltip-below" style="width:280px;">
-                                    High-resolution satellite imagery of your field location from ESRI World Imagery (updated every 1-6 months).<br><br>
-                                    <strong>Used for:</strong> Field boundary verification and visual context<br>
+                                <span class="tooltip-text tooltip-below" style="width:320px;">
+                                    High-resolution satellite imagery from ESRI World Imagery (updated every 1-6 months).<br><br>
+                                    <strong>🖱️ Interactive Map:</strong><br>
+                                    • <strong>Click anywhere</strong> on the map to select a new field location<br>
+                                    • Coordinates will be automatically fetched<br>
+                                    • Dashboard updates with new NDVI & weather data<br><br>
+                                    <strong>Used for:</strong> Visual context & interactive location selection<br>
                                     <a href="#faq-section" style="color:#52c196; text-decoration:underline;">Learn More ↓</a>
                                     </span>
                                 </span>
                             </h2>
-                        <p class="card-subtitle">{{ config.LOCATION_NAME if config.LOCATION_NAME else 'Field Location' }}</p>
+                        <p class="card-subtitle">🖱️ Click map to change location | {{ config.LOCATION_NAME if config.LOCATION_NAME else 'Field Location' }}</p>
                         </div>
                     </div>
-                <div class="satellite-viewer">
-                    <div id="satellite-rgb-image" style="height:280px; width:100%; border-radius:8px; overflow:hidden;"></div>
+                <div class="satellite-viewer" style="position:relative;">
+                    <div id="satellite-rgb-image" style="height:280px; width:100%; border-radius:8px; overflow:hidden; cursor:crosshair;" title="Click anywhere to select new location"></div>
+                    <!-- Interactive Hint Overlay (fades after 5 seconds) -->
+                    <div id="map-hint" style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); 
+                                               background:rgba(0,0,0,0.8); color:#fff; padding:12px 20px; 
+                                               border-radius:8px; font-size:14px; font-weight:600; 
+                                               pointer-events:none; z-index:999; text-align:center;
+                                               box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                                               animation: fadeOut 5s forwards;">
+                        🖱️ Click anywhere on the map to change location
+                    </div>
                         <div style="position:absolute; top:10px; right:10px; z-index:1000; display:flex; gap:5px;">
                             <button onclick="zoomSatelliteMap('in')" class="map-control-btn" title="Zoom In">➕</button>
                             <button onclick="zoomSatelliteMap('out')" class="map-control-btn" title="Zoom Out">➖</button>
@@ -1358,6 +1371,7 @@
 
         // NDVI Heatmap with proper color mapping
         function initNDVIHeatmap() {
+            console.log('📊 ==================== NDVI HEATMAP DEBUG ====================');
             console.log('📊 initNDVIHeatmap called');
             console.log('📊 NDVI Data:', ndviData);
             console.log('📊 NDVI Data type:', typeof ndviData, Array.isArray(ndviData));
@@ -1396,7 +1410,25 @@
             });
             
             const meanNDVI = sumNDVI / count;
-            console.log('📊 NDVI Stats:', { min: minNDVI.toFixed(3), max: maxNDVI.toFixed(3), mean: meanNDVI.toFixed(3) });
+            console.log('📊 NDVI Stats:', { 
+                min: minNDVI.toFixed(3), 
+                max: maxNDVI.toFixed(3), 
+                mean: meanNDVI.toFixed(3),
+                count: count,
+                uniqueValues: new Set(ndviData.flat()).size
+            });
+            
+            // Diagnose color mapping
+            const colorRanges = {
+                'Dark Blue (0.0-0.2)': ndviData.flat().filter(v => v >= 0.0 && v < 0.2).length,
+                'Blue (0.2-0.3)': ndviData.flat().filter(v => v >= 0.2 && v < 0.3).length,
+                'Teal (0.3-0.4)': ndviData.flat().filter(v => v >= 0.3 && v < 0.4).length,
+                'Green (0.4-0.6)': ndviData.flat().filter(v => v >= 0.4 && v < 0.6).length,
+                'Yellow-Green (0.6-0.8)': ndviData.flat().filter(v => v >= 0.6 && v < 0.8).length,
+                'Yellow (0.8-1.0)': ndviData.flat().filter(v => v >= 0.8 && v <= 1.0).length
+            };
+            console.log('📊 Color Distribution:', colorRanges);
+            console.log('📊 ================================================================');
             
             // Enhanced colorscale for better visualization
             // Maps NDVI values to vibrant colors matching the legend
@@ -1941,23 +1973,68 @@
             return headGroup;
         }
         
+        // Map NDVI value to vegetation characteristics
+        function ndviToVegetationParams(ndviValue) {
+            // Clamp NDVI to valid range (handle negative values from non-vegetated areas)
+            ndviValue = Math.max(0.0, Math.min(1.0, ndviValue));
+            
+            // NDVI ranges and corresponding vegetation characteristics
+            if (ndviValue < 0.2) {
+                // Dark Blue: No vegetation / Bare soil (but show minimum vegetation for visibility)
+                return {
+                    density: 0.15,  // Minimum 15% visibility (was 0.0)
+                    color: 0x8B7355,  // Light soil/dead grass color
+                    heightFactor: 0.3,  // Very short (was 0.0)
+                    description: 'Bare soil / Dead vegetation'
+                };
+            } else if (ndviValue < 0.3) {
+                // Blue: Very sparse crops / Early emergence
+                return {
+                    density: 0.25,  // 25% plant coverage
+                    color: 0x7c9473,  // Pale green
+                    heightFactor: 0.5,  // Short plants
+                    description: 'Very sparse'
+                };
+            } else if (ndviValue < 0.4) {
+                // Teal: Moderate vegetation / Growing crops
+                return {
+                    density: 0.50,  // 50% plant coverage
+                    color: 0x4a8c6f,  // Teal-green
+                    heightFactor: 0.70,  // Medium height
+                    description: 'Moderate'
+                };
+            } else if (ndviValue < 0.6) {
+                // Green: Healthy crops / Good canopy
+                return {
+                    density: 0.75,  // 75% plant coverage
+                    color: 0x52c196,  // Healthy green
+                    heightFactor: 0.90,  // Near full height
+                    description: 'Healthy'
+                };
+            } else {
+                // Bright Green: Very healthy / Dense vegetation
+                return {
+                    density: 1.0,  // 100% plant coverage
+                    color: 0x4CAF50,  // Bright green
+                    heightFactor: 1.0,  // Full height
+                    description: 'Very healthy'
+                };
+            }
+        }
+        
         // Create realistic wheat field connected to NDVI heatmap
         function createRealisticWheatField(stageName, tier) {
             const stageData = GROWTH_STAGES[stageName];
             const gridSize = 10;
             const spacing = 1.8;
-            const baseDensity = tier.density;
-            const baseColor = tier.color;
-            const heightMultiplier = tier.height;
             
-            console.log('🌾 createRealisticWheatField:', { stageName, tierDensity: baseDensity, tierColor: baseColor, tierHeight: heightMultiplier });
+            console.log('🌾 createRealisticWheatField:', { stageName, usingNDVIGrid: true });
             
             const avgHeight = (stageData.heightRange[0] + stageData.heightRange[1]) / 2;
-            const stemHeight = (avgHeight / 15) * heightMultiplier;
             
-            // Get NDVI grid data for per-plant health
+            // Get NDVI grid data for spatially-accurate vegetation
             const ndviGrid = ndviData;
-            const hasNDVI = ndviGrid && ndviGrid.length > 0;
+            const hasNDVI = ndviGrid && ndviGrid.length > 0 && ndviGrid.length === gridSize;
             
             // Get or generate fixed plant positions
             const positions = generatePlantPositions(gridSize, spacing);
@@ -1965,58 +2042,63 @@
             // Use seeded random for consistent density checks
             let densitySeed = 54321;
             
-            // CRITICAL FIX: Ensure minimum absolute density of 55% for ALL stages
-            // This guarantees field is never empty, especially for heading/grain_filling
-            const guaranteedMinDensity = 0.55;
-            
             let plantsCreated = 0;
             let plantsSkipped = 0;
+            let cellStats = {}; // Track plants per NDVI cell for debugging
             
             for (let i = 0; i < positions.length; i++) {
                 const pos = positions[i];
                 const row = pos.row;
                 const col = pos.col;
                 
-                // Get NDVI value for this position
-                let localHealth = 1.0;
-                if (hasNDVI) {
-                    const ndviRow = Math.floor((row / gridSize) * ndviGrid.length);
-                    const ndviCol = Math.floor((col / gridSize) * ndviGrid[0].length);
-                    const ndviValue = ndviGrid[ndviRow][ndviCol];
-                    localHealth = Math.max(0.3, Math.min(1.0, ndviValue));
+                // Get NDVI value for this specific grid cell
+                let ndviValue = 0.5; // Default moderate value
+                let vegParams = ndviToVegetationParams(ndviValue);
+                
+                if (hasNDVI && row < ndviGrid.length && col < ndviGrid[0].length) {
+                    // Map plant position directly to NDVI grid cell
+                    ndviValue = ndviGrid[row][col];
+                    vegParams = ndviToVegetationParams(ndviValue);
+                    
+                    // Track statistics per cell
+                    const cellKey = `${row},${col}`;
+                    if (!cellStats[cellKey]) {
+                        cellStats[cellKey] = { ndvi: ndviValue, plants: 0, desc: vegParams.description };
+                    }
                 }
                 
-                // Density calculation with GUARANTEED minimum
-                // Use Math.max to ensure we NEVER go below 55% density
-                const calculatedDensity = baseDensity * localHealth;
-                const plantDensity = Math.max(guaranteedMinDensity, calculatedDensity);
-                
-                // Skip plant based on density (but guaranteed minimum ensures visibility)
+                // Skip plant based on NDVI-derived density (but ensure minimum visibility)
                 const randomValue = seededRandom(densitySeed + i);
-                if (randomValue > plantDensity) {
+                // Ensure at least 10% density for visualization purposes
+                const effectiveDensity = Math.max(0.10, vegParams.density);
+                
+                if (randomValue > effectiveDensity) {
                     plantsSkipped++;
                     continue;
                 }
                 
                 plantsCreated++;
+                if (cellStats[`${row},${col}`]) {
+                    cellStats[`${row},${col}`].plants++;
+                }
                 
                 const plantGroup = new THREE.Group();
                 
                 // Use pre-calculated fixed positions
                 plantGroup.position.set(pos.x, 0, pos.z);
                 plantGroup.rotation.y = pos.rotation;
+                
+                // Calculate stem height based on NDVI-derived height factor and growth stage
+                const cellStemHeight = (avgHeight / 15) * vegParams.heightFactor;
                     
                     // Main stem with texture
                     const stemSegments = 12;
                     const stemGeometry = new THREE.CylinderGeometry(
-                        0.04, 0.06, stemHeight, stemSegments
-                    );
-                    
-                    // Color varies with local NDVI
-                    const stemColor = new THREE.Color(baseColor);
-                    if (localHealth < 0.7) {
-                        stemColor.lerp(new THREE.Color(0xb8b857), 0.3);
-                    }
+                    0.04, 0.06, cellStemHeight, stemSegments
+                );
+                
+                // Use NDVI-derived color for this cell
+                const stemColor = new THREE.Color(vegParams.color);
                     
                     const stemMaterial = new THREE.MeshStandardMaterial({
                         color: stemColor,
@@ -2025,21 +2107,22 @@
                     });
                     
                     const stem = new THREE.Mesh(stemGeometry, stemMaterial);
-                    stem.position.y = stemHeight / 2;
+                    stem.position.y = cellStemHeight / 2;
                     stem.castShadow = true;
                     stem.receiveShadow = true;
                     plantGroup.add(stem);
                     
                     // Realistic leaves (use seeded random for consistency)
                     let leafSeed = pos.seed + 1000;
-                    const numLeaves = Math.floor((5 + seededRandom(leafSeed++) * 4) * localHealth);
+                    // Leaf count based on NDVI-derived density (healthier = more leaves)
+                    const numLeaves = Math.floor((5 + seededRandom(leafSeed++) * 4) * vegParams.density);
                     for (let leafIdx = 0; leafIdx < numLeaves; leafIdx++) {
-                        const leafLength = 0.8 + seededRandom(leafSeed++) * 0.4;
+                        const leafLength = (0.8 + seededRandom(leafSeed++) * 0.4) * vegParams.heightFactor;
                         const leafWidth = 0.12 + seededRandom(leafSeed++) * 0.05;
-                        const leaf = createRealisticLeaf(leafLength, leafWidth, baseColor, localHealth);
+                        const leaf = createRealisticLeaf(leafLength, leafWidth, vegParams.color, vegParams.density);
                         
                         const angle = (leafIdx / numLeaves) * Math.PI * 2 + seededRandom(leafSeed++) * 0.3;
-                        const heightOffset = (leafIdx / numLeaves) * stemHeight * 0.7;
+                        const heightOffset = (leafIdx / numLeaves) * cellStemHeight * 0.7;
                         
                         leaf.position.set(
                             0,
@@ -2055,8 +2138,8 @@
                     
                     // Wheat heads for later stages
                     if (['heading', 'grain_filling'].includes(stageName)) {
-                        const head = createWheatHead(stageName, localHealth);
-                        head.position.y = stemHeight;
+                        const head = createWheatHead(stageName, vegParams.density);
+                        head.position.y = cellStemHeight;
                         head.rotation.x = -0.1 + seededRandom(pos.seed + 2000) * 0.2;
                         plantGroup.add(head);
                     }
@@ -2066,7 +2149,7 @@
                         let tillerSeed = pos.seed + 3000;
                         const numTillers = Math.floor(2 + seededRandom(tillerSeed++) * 3);
                         for (let t = 0; t < numTillers; t++) {
-                            const tillerHeight = stemHeight * (0.7 + seededRandom(tillerSeed++) * 0.3);
+                            const tillerHeight = cellStemHeight * (0.7 + seededRandom(tillerSeed++) * 0.3);
                             const tillerGeometry = new THREE.CylinderGeometry(0.03, 0.04, tillerHeight, 8);
                             const tiller = new THREE.Mesh(tillerGeometry, stemMaterial);
                             
@@ -2085,14 +2168,41 @@
                     fieldGroup.add(plantGroup);
             }
             
-            console.log('🌾 Field generation complete:', { 
+            console.log('🌾 Field generation complete (NDVI-driven):', { 
                 stageName, 
                 plantsCreated, 
                 plantsSkipped, 
                 totalPositions: positions.length,
                 finalDensity: (plantsCreated / positions.length * 100).toFixed(1) + '%',
-                baseDensity: (baseDensity * 100).toFixed(1) + '%'
+                usingNDVIGrid: hasNDVI,
+                gridSize: hasNDVI ? `${ndviGrid.length}x${ndviGrid[0].length}` : 'N/A'
             });
+            
+            // Log sample cell statistics with NDVI values
+            if (hasNDVI) {
+                const sampleCells = Object.keys(cellStats).slice(0, 10);
+                console.log('📊 Sample NDVI cells (first 10):', sampleCells.map(key => {
+                    const stats = cellStats[key];
+                    return `${key}: NDVI=${stats.ndvi.toFixed(3)}, ${stats.desc}, ${stats.plants} plants`;
+                }));
+                
+                // Calculate NDVI statistics
+                const allNDVIs = Object.values(cellStats).map(s => s.ndvi);
+                const minNDVI = Math.min(...allNDVIs);
+                const maxNDVI = Math.max(...allNDVIs);
+                const avgNDVI = allNDVIs.reduce((a, b) => a + b, 0) / allNDVIs.length;
+                console.log('📊 NDVI Statistics:', {
+                    min: minNDVI.toFixed(3),
+                    max: maxNDVI.toFixed(3),
+                    avg: avgNDVI.toFixed(3),
+                    negativeValues: allNDVIs.filter(v => v < 0).length
+                });
+                
+                if (plantsCreated === 0) {
+                    console.error('❌ WARNING: NO PLANTS CREATED! This usually means NDVI values are too low or negative.');
+                    console.error('💡 Solution: Select a different location with vegetation, or check NDVI data source.');
+                }
+            }
         }
             
         function animate() {
@@ -2196,7 +2306,193 @@
                     opacity: 0.6,
                     fillOpacity: 0.1
                 }).addTo(satelliteMap);
+                
+                // Add click event listener for interactive location selection
+                satelliteMap.on('click', function(e) {
+                    const clickedLat = e.latlng.lat;
+                    const clickedLon = e.latlng.lng;
+                    handleMapClick(clickedLat, clickedLon);
+                });
+                
+                console.log('✅ Satellite map initialized with interactive click enabled');
             }
+        }
+        
+        // Handle map click for location selection
+        let tempMarker = null;
+        let isUpdatingLocation = false; // Prevent multiple simultaneous updates
+        
+        function handleMapClick(lat, lon) {
+            console.log('🗺️ Map clicked at:', lat.toFixed(6), lon.toFixed(6));
+            
+            // Don't allow new selections while updating
+            if (isUpdatingLocation) {
+                console.log('⚠️ Location update in progress, ignoring click');
+                return;
+            }
+            
+            // Show temporary marker at clicked location
+            if (tempMarker) {
+                satelliteMap.removeLayer(tempMarker);
+            }
+            
+            tempMarker = L.circleMarker([lat, lon], {
+                radius: 10,
+                fillColor: '#fbbf24',
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            }).addTo(satelliteMap);
+            
+            // Add pulsing effect
+            tempMarker.bindPopup(`
+                <div id="location-popup" style="text-align:center; font-family: Inter, sans-serif;">
+                    <strong>📍 New Location</strong><br>
+                    <span style="font-size:12px; color:#666;">
+                        ${lat.toFixed(6)}, ${lon.toFixed(6)}
+                    </span><br><br>
+                    <button id="confirm-btn" onclick="confirmLocationChange(${lat}, ${lon})" 
+                            style="background:#52c196; color:#fff; border:none; padding:8px 16px; 
+                                   border-radius:6px; cursor:pointer; font-weight:600; margin-right:8px;">
+                        ✅ Use This Location
+                    </button>
+                    <button onclick="cancelLocationChange()" 
+                            style="background:#e74c3c; color:#fff; border:none; padding:8px 16px; 
+                                   border-radius:6px; cursor:pointer; font-weight:600;">
+                        ✖ Cancel
+                    </button>
+                </div>
+            `, {
+                closeButton: false,
+                maxWidth: 300
+            }).openPopup();
+        }
+        
+        // Confirm location change
+        function confirmLocationChange(lat, lon) {
+            console.log('✅ Confirming location change to:', lat, lon);
+            
+            // Prevent multiple clicks
+            if (isUpdatingLocation) {
+                console.log('⚠️ Update already in progress, ignoring duplicate click');
+                return;
+            }
+            isUpdatingLocation = true;
+            
+            // Show loading state
+            const popup = tempMarker.getPopup();
+            popup.setContent(`
+                <div style="text-align:center; font-family: Inter, sans-serif; padding:10px;">
+                    <div style="font-size:24px; animation: spin 1s linear infinite;">🔄</div>
+                    <p style="margin:10px 0 0 0;">Fetching location details...</p>
+                </div>
+            `);
+            
+            console.log('📡 Step 1: Calling /api/geocode...');
+            
+            // Fetch location details via geocoding
+            fetch('/api/geocode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: lat, lon: lon })
+            })
+            .then(response => {
+                console.log('📡 Geocode response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('📡 Geocode data:', data);
+                if (data.success) {
+                    const locationName = data.location.full_address || data.location.name;
+                    const dmsLat = data.coordinates.dms.lat;
+                    const dmsLon = data.coordinates.dms.lon;
+                    
+                    console.log('📡 Step 2: Calling /api/update-location...');
+                    console.log('📡 Location name:', locationName);
+                    
+                    // Update location configuration
+                    return fetch('/api/update-location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lat: lat,
+                            lon: lon,
+                            location_name: locationName,
+                            dms_lat: dmsLat,
+                            dms_lon: dmsLon
+                        })
+                    });
+                } else {
+                    throw new Error(data.error || 'Failed to geocode location');
+                }
+            })
+            .then(response => {
+                console.log('📡 Update-location response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('📡 Update-location data:', data);
+                if (data.success) {
+                    console.log('✅ Location updated successfully!');
+                    console.log('🔄 Showing success message and preparing to reload...');
+                    
+                    // Show success message
+                    popup.setContent(`
+                        <div style="text-align:center; font-family: Inter, sans-serif; padding:10px;">
+                            <div style="font-size:32px;">✅</div>
+                            <p style="margin:10px 0 0 0; font-weight:600; color:#52c196;">
+                                Location Updated!
+                            </p>
+                            <p style="margin:5px 0 0 0; font-size:12px; color:#666;">
+                                Reloading dashboard in 1.5s...
+                            </p>
+                        </div>
+                    `);
+                    
+                    console.log('⏱️ Starting 1.5 second countdown to reload...');
+                    
+                    // Reload page after 1.5 seconds with cache-busting
+                    setTimeout(() => {
+                        console.log('🔄 RELOADING PAGE NOW WITH FRESH DATA!');
+                        // Add ?refresh=timestamp to force fresh data fetch
+                        const timestamp = Date.now();
+                        window.location.href = `/?refresh=1&t=${timestamp}`;
+                    }, 1500);
+                } else {
+                    throw new Error(data.error || 'Failed to update location');
+                }
+            })
+            .catch(error => {
+                console.error('❌ Location update error:', error);
+                isUpdatingLocation = false; // Reset flag on error
+                popup.setContent(`
+                    <div style="text-align:center; font-family: Inter, sans-serif; padding:10px;">
+                        <div style="font-size:32px;">❌</div>
+                        <p style="margin:10px 0 0 0; font-weight:600; color:#e74c3c;">
+                            Error
+                        </p>
+                        <p style="margin:5px 0 10px 0; font-size:12px; color:#666;">
+                            ${error.message}
+                        </p>
+                        <button onclick="cancelLocationChange()" 
+                                style="background:#666; color:#fff; border:none; padding:6px 12px; 
+                                       border-radius:4px; cursor:pointer; font-size:12px;">
+                            Close
+                        </button>
+                    </div>
+                `);
+            });
+        }
+        
+        // Cancel location change
+        function cancelLocationChange() {
+            if (tempMarker) {
+                satelliteMap.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+            isUpdatingLocation = false; // Reset flag
+            console.log('✖ Location change canceled');
         }
         
         function zoomSatelliteMap(direction) {
